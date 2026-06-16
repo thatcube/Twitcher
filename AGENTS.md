@@ -44,4 +44,12 @@ xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID"
 
 ## Git workflow
 
+Agents must not leave local commits unpushed when finishing a task.
+
+Required completion rule:
+1. After making requested file changes, create one commit that includes all requested files for that task.
+2. Push that commit to the currently checked out branch before ending the task.
+3. Report the pushed commit hash in the response.
+4. If the user explicitly says not to push, skip push and state that clearly.
+
 When user asks to push, include all requested modified files in one commit, push to the current branch, then deploy to Apple TV and report commit hash.

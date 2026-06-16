@@ -486,11 +486,6 @@ struct PlayerView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color(white: 0.07).opacity(0.98))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(.white.opacity(0.15))
-                .frame(height: 1)
-        }
     }
 
     // MARK: - Quality picker
