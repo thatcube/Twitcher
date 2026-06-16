@@ -1,54 +1,79 @@
 # Twitcher
 
-A free, open-source **Apple TV** app for watching Twitch — built to be faster and cleaner than the official app, with **native third-party emote support** (7TV, BTTV, FFZ) that Twitch's own app lacks.
+A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
 
-> ⚠️ **Early development.** Not yet usable. See [twitcher-plan.md](twitcher-plan.md) for the full build plan and roadmap.
+## Current State
 
-## Goals
+Twitcher is now usable for the core experience:
 
-- **Watch streams** smoothly on Apple TV (native `AVPlayer`).
-- **Read chat** with proper rendering of 7TV / BTTV / FFZ emotes — including animated ones.
-- **Fast and clean** — a better experience than the official Twitch tvOS app.
-- **Free forever.** No ads, no paywalls. Optional donations only.
+- Live playback on real Apple TV hardware.
+- Side-by-side layout: video on the left, chat pane on the right.
+- Read-only anonymous chat via Twitch IRC over WebSocket (`justinfan` guest).
+- Quality picker with persistence (`Auto` + explicit qualities), ordered highest-to-lowest.
+- Custom bottom overlay controls with tvOS focus navigation.
+- Chat composer UI in the chat pane (input UI only; sending not yet enabled).
+- Twitch badges in chat (global + channel-specific).
+- Emotes in chat:
+	- Twitch native emotes (including channel/subscriber emotes from IRC `emotes` tags).
+	- 7TV global + channel.
+	- BTTV global + channel/shared.
+	- FFZ global + channel.
 
-Sending chat messages is a planned secondary feature; watching and reading come first.
+## What Is Not Done Yet
 
-## Status
+- Sending chat messages.
+- Followed-streams home experience (OAuth/device flow + followed channels UI).
+- Animated emote playback polish (currently image-first rendering; first-time fetch may briefly delay).
+- Broader player polish and settings UX.
 
-| Phase | Description | Status |
-|---|---|---|
-| 0 | Playback proof-of-concept (the make-or-break gate) | 🚧 Not started |
-| 1 | Auth (Twitch device flow, minimal) | ⬜ |
-| 2 | Home screen — followed live streams | ⬜ |
-| 3 | Chat (read-only, anonymous) | ⬜ |
-| 4 | Native third-party emotes | ⬜ |
-| 5 | Player + chat layout | ⬜ |
+## Tech Stack
 
-## Tech
+- Swift / SwiftUI targeting tvOS.
+- AVPlayer-backed playback with custom overlay controls.
+- XcodeGen project generation (`project.yml` is source of truth).
 
-- **Swift / SwiftUI**, targeting tvOS.
-- Developed in **VS Code** with the Swift + [SweetPad](https://sweetpad.hyzyla.dev) extensions; **Xcode** provides the SDKs/simulators/signing.
+## Build & Run
 
-## Building
+Prerequisites:
 
-Requires macOS with Xcode installed.
+- macOS with Xcode installed.
+- Homebrew tools:
 
 ```bash
-brew install xcode-build-server xcbeautify
+brew install xcodegen xcbeautify xcode-build-server
 ```
 
-Open the project in VS Code with the Swift and SweetPad extensions, or open `Twitcher.xcodeproj` in Xcode. Detailed setup is in [twitcher-plan.md](twitcher-plan.md).
+Generate the project:
 
-## A note on how this works
+```bash
+xcodegen generate
+```
 
-Apple TV has no official Twitch playback SDK, so Twitcher fetches stream playlists the same way open-source clients like [Streamlink](https://github.com/streamlink/streamlink) and [Frosty](https://github.com/tommyxchow/frosty) do. This is a non-commercial, ad-respecting hobby project in the same spirit as those tools.
+Build:
 
-## Funding
+```bash
+xcodebuild \
+	-project Twitcher.xcodeproj \
+	-scheme Twitcher \
+	-configuration Debug \
+	-destination 'generic/platform=tvOS Simulator' \
+	build | xcbeautify
+```
 
-Twitcher is free and donation-supported. If it's useful to you, donations help cover the Apple Developer fee and development time. (Links coming once the project is usable.)
+For real Apple TV deployment, use a valid signing team and a device destination.
+
+## How Playback Works
+
+Apple TV has no official Twitch playback SDK. Twitcher resolves playback via Twitch GraphQL PlaybackAccessToken and Usher HLS playlists, similar in spirit to open-source clients like Streamlink and Frosty.
+
+This project is non-commercial and ad-respecting.
+
+## Roadmap
+
+See [twitcher-plan.md](twitcher-plan.md) for detailed phased planning.
 
 ## License
 
 [MIT](LICENSE) © 2026 thatcube
 
-*Not affiliated with or endorsed by Twitch Interactive, Inc.*
+Not affiliated with or endorsed by Twitch Interactive, Inc.

@@ -13,6 +13,7 @@ final class ChatService {
     private(set) var messages: [ChatMessage] = []
     private(set) var isConnected = false
     private(set) var emoteURLs: [String: URL] = [:]
+    private(set) var badgeURLs: [String: URL] = [:]
 
     private let endpoint = URL(string: "wss://irc-ws.chat.twitch.tv:443")!
     private let maxMessages = 250
@@ -27,6 +28,7 @@ final class ChatService {
         let normalized = channel.lowercased()
         self.channel = normalized
         emoteURLs = [:]
+        badgeURLs = [:]
 
         let task = URLSession(configuration: .default).webSocketTask(with: endpoint)
         socket = task
@@ -43,6 +45,13 @@ final class ChatService {
             self.emoteURLs = catalog
         }
 
+        Task { [weak self] in
+            guard let self else { return }
+            let catalog = await BadgeCatalogService.shared.catalog(for: normalized)
+            guard self.channel == normalized else { return }
+            self.badgeURLs = catalog
+        }
+
         receiveTask = Task { [weak self] in await self?.receiveLoop() }
     }
 
@@ -55,6 +64,7 @@ final class ChatService {
         isConnected = false
         messages.removeAll()
         emoteURLs.removeAll()
+        badgeURLs.removeAll()
         channel = nil
     }
 
@@ -97,5 +107,98 @@ final class ChatService {
                 }
             }
         }
+    }
+}
+
+actor BadgeCatalogService {
+    static let shared = BadgeCatalogService()
+
+    private let clientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+    private let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+    private var cache: [String: [String: URL]] = [:]
+
+    func catalog(for channel: String) async -> [String: URL] {
+        let key = channel.lowercased()
+        if let cached = cache[key] { return cached }
+
+        let userID = await twitchUserID(for: key)
+
+        async let global = fetchGlobalBadges()
+        async let channelBadges = fetchChannelBadges(twitchUserID: userID)
+
+        let merged = (await global).merging(await channelBadges) { _, new in new }
+        cache[key] = merged
+        return merged
+    }
+
+    private func fetchGlobalBadges() async -> [String: URL] {
+        guard let url = URL(string: "https://badges.twitch.tv/v1/badges/global/display") else { return [:] }
+        guard let json = await fetchJSON(url: url) as? [String: Any] else { return [:] }
+        return parseBadgeDisplayJSON(json)
+    }
+
+    private func fetchChannelBadges(twitchUserID: String?) async -> [String: URL] {
+        guard let twitchUserID,
+              let url = URL(string: "https://badges.twitch.tv/v1/badges/channels/\(twitchUserID)/display") else {
+            return [:]
+        }
+        guard let json = await fetchJSON(url: url) as? [String: Any] else { return [:] }
+        return parseBadgeDisplayJSON(json)
+    }
+
+    private func parseBadgeDisplayJSON(_ json: [String: Any]) -> [String: URL] {
+        guard let sets = json["badge_sets"] as? [String: Any] else { return [:] }
+        var out: [String: URL] = [:]
+
+        for (setName, setValue) in sets {
+            guard let set = setValue as? [String: Any],
+                  let versions = set["versions"] as? [String: Any] else { continue }
+
+            for (version, versionValue) in versions {
+                guard let meta = versionValue as? [String: Any] else { continue }
+                let urlString = (meta["image_url_2x"] as? String)
+                    ?? (meta["image_url_4x"] as? String)
+                    ?? (meta["image_url_1x"] as? String)
+                guard let urlString, let url = URL(string: urlString) else { continue }
+                out["\(setName)/\(version)"] = url
+            }
+        }
+
+        return out
+    }
+
+    private func twitchUserID(for login: String) async -> String? {
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
+        req.httpMethod = "POST"
+        req.setValue(clientID, forHTTPHeaderField: "Client-ID")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let query = "query UserID($login: String!) { user(login: $login) { id } }"
+        let body: [String: Any] = [
+            "query": query,
+            "variables": ["login": login],
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        guard let json = await fetchJSON(request: req) as? [String: Any] else { return nil }
+        guard let data = json["data"] as? [String: Any] else { return nil }
+        guard let user = data["user"] as? [String: Any] else { return nil }
+        return user["id"] as? String
+    }
+
+    private func fetchJSON(url: URL) async -> Any? {
+        guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    private func fetchJSON(request: URLRequest) async -> Any? {
+        guard let (data, response) = try? await URLSession.shared.data(for: request) else { return nil }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
     }
 }

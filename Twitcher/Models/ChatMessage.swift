@@ -6,7 +6,12 @@ struct ChatMessage: Identifiable {
     let username: String
     /// Twitch user color as a `#RRGGBB` hex string, if the user set one.
     let colorHex: String?
+    /// Twitch badge keys from IRC `badges` tag, e.g. `subscriber/6`.
+    let badgeKeys: [String]
     let text: String
+    /// Message-scoped native Twitch emotes parsed from IRC `emotes` tag.
+    /// Key = emote token in this message, value = CDN image URL.
+    let twitchEmoteURLs: [String: URL]
     /// True for `/me` action messages (rendered in the user's color).
     let isAction: Bool
 }
@@ -55,10 +60,56 @@ extension ChatMessage {
 
         let display = tags["display-name"].flatMap { $0.isEmpty ? nil : $0 } ?? nickFromPrefix
         let color = tags["color"].flatMap { $0.isEmpty ? nil : $0 }
+        let badges = Self.parseBadgeKeys(tags["badges"])
+        let twitchEmoteURLs = Self.parseTwitchEmoteURLs(tags["emotes"], in: message)
 
         self.username = display
         self.colorHex = color
+        self.badgeKeys = badges
         self.text = message
+        self.twitchEmoteURLs = twitchEmoteURLs
         self.isAction = action
+    }
+
+    private static func parseBadgeKeys(_ tag: String?) -> [String] {
+        guard let tag, !tag.isEmpty else { return [] }
+        return tag
+            .split(separator: ",")
+            .map { String($0) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func parseTwitchEmoteURLs(_ tag: String?, in message: String) -> [String: URL] {
+        guard let tag, !tag.isEmpty else { return [:] }
+
+        // Format: emoteID:start-end,start-end/emoteID:start-end
+        let text = message as NSString
+        var out: [String: URL] = [:]
+
+        for group in tag.split(separator: "/") {
+            let parts = group.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let emoteID = String(parts[0])
+            let ranges = parts[1].split(separator: ",")
+
+            for rangeToken in ranges {
+                let bounds = rangeToken.split(separator: "-", maxSplits: 1)
+                guard bounds.count == 2,
+                      let start = Int(bounds[0]),
+                      let endInclusive = Int(bounds[1]) else { continue }
+
+                let length = endInclusive - start + 1
+                guard start >= 0, length > 0, start + length <= text.length else { continue }
+
+                let token = text.substring(with: NSRange(location: start, length: length))
+                guard !token.isEmpty,
+                      let url = URL(string: "https://static-cdn.jtvnw.net/emoticons/v2/\(emoteID)/default/dark/2.0")
+                else { continue }
+
+                out[token] = url
+            }
+        }
+
+        return out
     }
 }

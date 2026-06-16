@@ -11,12 +11,29 @@ settings:
     SWIFT_VERSION: "6.0"
     GENERATE_INFOPLIST_FILE: YES
     TARGETED_DEVICE_FAMILY: "3" # Apple TV
+packages:
+  SDWebImage:
+    url: https://github.com/SDWebImage/SDWebImage.git
+    from: 5.21.0
+  SDWebImageSwiftUI:
+    url: https://github.com/SDWebImage/SDWebImageSwiftUI.git
+    from: 3.1.3
+  SDWebImageWebPCoder:
+    url: https://github.com/SDWebImage/SDWebImageWebPCoder.git
+    from: 0.14.6
 targets:
   Twitcher:
     type: application
     platform: tvOS
     sources:
       - path: Twitcher
+    dependencies:
+      - package: SDWebImage
+        product: SDWebImage
+      - package: SDWebImageSwiftUI
+        product: SDWebImageSwiftUI
+      - package: SDWebImageWebPCoder
+        product: SDWebImageWebPCoder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.twitcher

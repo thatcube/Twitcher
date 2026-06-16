@@ -1,9 +1,11 @@
 import SwiftUI
+import SDWebImageSwiftUI
 
 struct RichChatLineView: View {
     let message: ChatMessage
     let nameColor: Color
     let emoteURLs: [String: URL]
+    let badgeURLs: [String: URL]
 
     private enum Segment: Hashable {
         case text(String)
@@ -14,8 +16,16 @@ struct RichChatLineView: View {
         message.isAction ? nameColor : .white
     }
 
+    private var resolvedBadgeURLs: [URL] {
+        message.badgeKeys.compactMap { badgeURLs[$0] }
+    }
+
     var body: some View {
         ChatFlowLayout(itemSpacing: 0, rowSpacing: 4) {
+            ForEach(Array(resolvedBadgeURLs.enumerated()), id: \.offset) { _, badgeURL in
+                badgeView(url: badgeURL)
+            }
+
             Text(message.isAction ? "\(message.username) " : "\(message.username): ")
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(nameColor)
@@ -28,6 +38,23 @@ struct RichChatLineView: View {
     }
 
     @ViewBuilder
+    private func badgeView(url: URL) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 22, height: 22)
+            default:
+                Color.clear
+                    .frame(width: 22, height: 22)
+            }
+        }
+        .frame(width: 22, height: 22)
+    }
+
+    @ViewBuilder
     private func segmentView(_ segment: Segment) -> some View {
         switch segment {
         case .text(let text):
@@ -35,20 +62,7 @@ struct RichChatLineView: View {
                 .font(.system(size: 26))
                 .foregroundStyle(bodyColor)
         case .emote(let name, let url):
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 34, height: 34)
-                default:
-                    Text(name)
-                        .font(.system(size: 26))
-                        .foregroundStyle(bodyColor)
-                }
-            }
-            .frame(width: 34, height: 34)
+            EmoteView(name: name, url: url, fallbackColor: bodyColor)
         }
     }
 
@@ -97,6 +111,46 @@ struct RichChatLineView: View {
         }
 
         return output
+    }
+}
+
+private struct EmoteView: View {
+    private static let emoteHeight: CGFloat = 34
+    private static let minAspectRatio: CGFloat = 0.5
+    private static let maxAspectRatio: CGFloat = 4.0
+
+    let name: String
+    let url: URL
+    let fallbackColor: Color
+
+    @State private var loadFailed = false
+    @State private var aspectRatio: CGFloat = 1
+
+    private var emoteWidth: CGFloat {
+        Self.emoteHeight * aspectRatio
+    }
+
+    var body: some View {
+        Group {
+            if loadFailed {
+                Text(name)
+                    .font(.system(size: 26))
+                    .foregroundStyle(fallbackColor)
+            } else {
+                AnimatedImage(url: url)
+                    .onSuccess { image, _, _ in
+                        guard image.size.width > 0, image.size.height > 0 else { return }
+                        let ratio = image.size.width / image.size.height
+                        aspectRatio = min(max(ratio, Self.minAspectRatio), Self.maxAspectRatio)
+                    }
+                    .onFailure { _ in
+                        loadFailed = true
+                    }
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: emoteWidth, height: Self.emoteHeight)
+            }
+        }
     }
 }
 

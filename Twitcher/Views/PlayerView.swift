@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import UIKit
 
 /// Hosts an embedded `AVPlayerViewController` with native controls disabled.
 /// This keeps custom Twitcher UI while preserving Apple media rendering paths
@@ -12,6 +13,8 @@ struct VideoSurface: UIViewControllerRepresentable {
         controller.player = player
         controller.showsPlaybackControls = false
         controller.videoGravity = .resizeAspect
+        // Keep output mode stable while toggling in-app layouts (chat on/off).
+        controller.appliesPreferredDisplayCriteriaAutomatically = false
         controller.view.backgroundColor = .black
         return controller
     }
@@ -22,6 +25,7 @@ struct VideoSurface: UIViewControllerRepresentable {
         }
         controller.showsPlaybackControls = false
         controller.videoGravity = .resizeAspect
+        controller.appliesPreferredDisplayCriteriaAutomatically = false
     }
 }
 
@@ -45,10 +49,11 @@ struct PlayerView: View {
     @State private var showChat = true
     @State private var showQualityPicker = false
     @State private var showControls = false
-    @State private var captionsOn = false
+    @State private var captionsOn = UIAccessibility.isClosedCaptioningEnabled
     @State private var streamTitle: String = ""
     @State private var chatDraft: String = ""
     @State private var hideTask: Task<Void, Never>?
+    @State private var lastControlFocus: Focusable = .quality
 
     @FocusState private var focus: Focusable?
     private enum Focusable: Hashable {
@@ -83,10 +88,14 @@ struct PlayerView: View {
             await refreshStreamTitle()
             focus = .video
         }
+        .onAppear {
+            setIdleTimer(disabled: true)
+        }
         .onDisappear {
             hideTask?.cancel()
             player.pause()
             chat.disconnect()
+            setIdleTimer(disabled: false)
         }
         .onExitCommand {
             if showQualityPicker {
@@ -99,14 +108,29 @@ struct PlayerView: View {
                 dismiss()
             }
         }
-        .onMoveCommand { _ in
+        .onMoveCommand { direction in
             guard !showQualityPicker else { return }
+
             if !showControls {
                 // Directional movement should immediately surface controls and
                 // land on chat toggle so moving off chat feels instant.
                 revealControls(preferredFocus: .chatToggle)
             } else {
                 scheduleHide()
+            }
+        }
+        .onChange(of: focus) { _, newFocus in
+            // Keep control navigation deterministic: if tvOS drops focus to nil
+            // while controls are visible, immediately restore last valid control.
+            guard showControls, !showQualityPicker else { return }
+
+            if let newFocus, isControlFocus(newFocus) {
+                lastControlFocus = newFocus
+                return
+            }
+
+            if newFocus == nil {
+                focus = lastControlFocus
             }
         }
     }
@@ -118,15 +142,17 @@ struct PlayerView: View {
             VideoSurface(player: player)
                 .ignoresSafeArea()
 
-            // Invisible full-area catcher: pressing the remote reveals controls.
-            // A plain focusable view (not a Button) avoids tvOS's full-screen
-            // focus halo that made the whole video look like a giant card.
-            Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .focusable()
-                .focused($focus, equals: .video)
-                .onTapGesture { revealControls(preferredFocus: .quality) }
+            // Only expose the video focus target while controls are hidden.
+            // Otherwise, left-edge movement from the control cluster can escape
+            // into this invisible target and appear as lost focus.
+            if !showControls && !showQualityPicker {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .focusable()
+                    .focused($focus, equals: .video)
+                    .onTapGesture { revealControls(preferredFocus: .quality) }
+            }
 
             if isLoading {
                 ProgressView("Loading \(channel)…")
@@ -173,8 +199,13 @@ struct PlayerView: View {
                 .focused($focus, equals: .quality)
                 .onMoveCommand { direction in
                     switch direction {
-                    case .right: focus = .captions
-                    default: break
+                    case .left:
+                        // Left edge intentionally does nothing.
+                        break
+                    case .right:
+                        focus = .captions
+                    default:
+                        break
                     }
                 }
 
@@ -190,9 +221,12 @@ struct PlayerView: View {
                 .focused($focus, equals: .captions)
                 .onMoveCommand { direction in
                     switch direction {
-                    case .left: focus = .quality
-                    case .right: focus = .chatToggle
-                    default: break
+                    case .left:
+                        focus = .quality
+                    case .right:
+                        focus = .chatToggle
+                    default:
+                        break
                     }
                 }
 
@@ -210,10 +244,12 @@ struct PlayerView: View {
                 .focused($focus, equals: .chatToggle)
                 .onMoveCommand { direction in
                     switch direction {
-                    case .left: focus = .captions
+                    case .left:
+                        focus = .captions
                     case .right:
                         if showChat { focus = .chatInput }
-                    default: break
+                    default:
+                        break
                     }
                 }
             }
@@ -259,13 +295,23 @@ struct PlayerView: View {
         }
     }
 
+    private func isControlFocus(_ focus: Focusable) -> Bool {
+        switch focus {
+        case .quality, .captions, .chatToggle, .chatInput:
+            return true
+        default:
+            return false
+        }
+    }
+
     private var chatPane: some View {
         VStack(spacing: 0) {
             ChatView(
                 channel: channel,
                 messages: chat.messages,
                 isConnected: chat.isConnected,
-                emoteURLs: chat.emoteURLs
+                emoteURLs: chat.emoteURLs,
+                badgeURLs: chat.badgeURLs
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -285,7 +331,8 @@ struct PlayerView: View {
                     case .left:
                         revealControls(preferredFocus: .chatToggle)
                         focus = .chatToggle
-                    default: break
+                    default:
+                        break
                     }
                 }
         }
@@ -362,7 +409,7 @@ struct PlayerView: View {
         isLoading = true
         errorMessage = nil
         streamTitle = ""
-        player.appliesMediaSelectionCriteriaAutomatically = false
+        player.appliesMediaSelectionCriteriaAutomatically = true
         do {
             let resolved = try await PlaybackService.resolve(for: channel)
             playback = resolved
@@ -407,9 +454,8 @@ struct PlayerView: View {
         if let item = player.currentItem { applyCaptions(to: item, retries: 12) }
     }
 
-    /// Turns the in-band/closed captions on or off for a given item. Twitch
-    /// streams carry CEA-608 captions in the legible selection group; we
-    /// explicitly deselect them so they default off and can be toggled.
+    /// Turns in-band closed captions on or off for a given item. Twitch streams
+    /// carry CEA-608 captions in the legible selection group.
     ///
     /// The legible group can appear slightly after playback starts, so we retry
     /// for a short window instead of failing one-shot.
@@ -419,10 +465,13 @@ struct PlayerView: View {
             for attempt in 0...retries {
                 if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) {
                     await MainActor.run {
+                        guard !group.options.isEmpty else { return }
+
                         if wantCaptions {
-                            item.selectMediaOptionAutomatically(in: group)
-                            if item.currentMediaSelection.selectedMediaOption(in: group) == nil,
-                               let option = group.options.first {
+                            let preferred = group.options.first {
+                                !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
+                            } ?? group.options.first
+                            if let option = preferred {
                                 item.select(option, in: group)
                             }
                         } else {
@@ -437,5 +486,9 @@ struct PlayerView: View {
                 }
             }
         }
+    }
+
+    private func setIdleTimer(disabled: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = disabled
     }
 }

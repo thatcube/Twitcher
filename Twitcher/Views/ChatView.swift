@@ -7,6 +7,7 @@ struct ChatView: View {
     let messages: [ChatMessage]
     var isConnected: Bool = false
     var emoteURLs: [String: URL] = [:]
+    var badgeURLs: [String: URL] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,10 +65,12 @@ struct ChatView: View {
     }
 
     private func line(for message: ChatMessage) -> some View {
-        RichChatLineView(
+        let mergedEmotes = emoteURLs.merging(message.twitchEmoteURLs) { _, twitch in twitch }
+        return RichChatLineView(
             message: message,
             nameColor: color(for: message),
-            emoteURLs: emoteURLs
+            emoteURLs: mergedEmotes,
+            badgeURLs: badgeURLs
         )
     }
 
