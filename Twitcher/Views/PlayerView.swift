@@ -67,21 +67,11 @@ struct PlayerView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 if showChat {
-                    ChatView(
-                        channel: channel,
-                        messages: chat.messages,
-                        isConnected: chat.isConnected
-                    )
-                    .frame(width: chatWidth)
-                    .frame(maxHeight: .infinity)
-                    .transition(.move(edge: .trailing))
+                    chatPane
+                        .transition(.move(edge: .trailing))
                 }
             }
             .ignoresSafeArea()
-
-            if showChat {
-                chatComposerOverlay
-            }
 
             if showQualityPicker {
                 qualityPicker
@@ -183,7 +173,6 @@ struct PlayerView: View {
                 .focused($focus, equals: .quality)
                 .onMoveCommand { direction in
                     switch direction {
-                    case .left: focus = .quality
                     case .right: focus = .captions
                     default: break
                     }
@@ -223,7 +212,7 @@ struct PlayerView: View {
                     switch direction {
                     case .left: focus = .captions
                     case .right:
-                        focus = showChat ? .chatInput : .chatToggle
+                        if showChat { focus = .chatInput }
                     default: break
                     }
                 }
@@ -270,42 +259,46 @@ struct PlayerView: View {
         }
     }
 
-    private var chatComposerOverlay: some View {
-        HStack {
-            Spacer()
-
-            HStack(spacing: 10) {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .foregroundStyle(.green)
-
-                TextField("Send a message", text: $chatDraft)
-                    .textFieldStyle(.plain)
-                    .focused($focus, equals: .chatInput)
-                    .onMoveCommand { direction in
-                        switch direction {
-                        case .left:
-                            revealControls(preferredFocus: .chatToggle)
-                            focus = .chatToggle
-                        case .right:
-                            // Keep focus pinned; there is intentionally no
-                            // control to the right of chat input.
-                            focus = .chatInput
-                        default: break
-                        }
-                    }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(width: chatWidth - 24)
-            .background(Color(white: 0.08).opacity(0.98), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(.white.opacity(0.24), lineWidth: 1)
+    private var chatPane: some View {
+        VStack(spacing: 0) {
+            ChatView(
+                channel: channel,
+                messages: chat.messages,
+                isConnected: chat.isConnected
             )
-            .padding(.trailing, 12)
-            .padding(.bottom, 14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            chatComposerBar
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .frame(width: chatWidth)
+        .frame(maxHeight: .infinity)
+    }
+
+    private var chatComposerBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+                .foregroundStyle(.green)
+
+            TextField("Send a message", text: $chatDraft)
+                .textFieldStyle(.plain)
+                .focused($focus, equals: .chatInput)
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .left:
+                        revealControls(preferredFocus: .chatToggle)
+                        focus = .chatToggle
+                    default: break
+                    }
+                }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(white: 0.07).opacity(0.98))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(.white.opacity(0.15))
+                .frame(height: 1)
+        }
     }
 
     // MARK: - Quality picker

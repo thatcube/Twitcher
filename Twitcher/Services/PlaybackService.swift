@@ -29,6 +29,7 @@ struct StreamQuality: Identifiable, Hashable {
     let name: String      // display name, e.g. "1080p60 (Source)"
     let url: URL          // direct media-playlist URL for this single quality
     let isAudioOnly: Bool
+    let bitrate: Int      // BANDWIDTH from #EXT-X-STREAM-INF
 }
 
 /// Result of resolving a channel: the master (adaptive/"Auto") playlist plus the
@@ -196,6 +197,7 @@ struct PlaybackService {
         var pendingID: String?
         var pendingIsSource = false
         var pendingHasResolution = false
+        var pendingBitrate = 0
         for raw in lines {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("#EXT-X-STREAM-INF:") {
@@ -203,19 +205,31 @@ struct PlaybackService {
                 pendingName = attribute("IVS-NAME", in: line) ?? pendingID
                 pendingIsSource = attribute("IVS-VARIANT-SOURCE", in: line)?.lowercased() == "source"
                 pendingHasResolution = line.contains("RESOLUTION=")
+                pendingBitrate = Int(attribute("BANDWIDTH", in: line) ?? "") ?? 0
             } else if !line.isEmpty, !line.hasPrefix("#"), let url = URL(string: line) {
                 let id = pendingID ?? pendingName ?? "source"
                 let nameLower = (pendingName ?? id).lowercased()
                 let isAudio = !pendingHasResolution || nameLower.contains("audio")
                 let display = displayName(pendingName ?? id, isSource: pendingIsSource, isAudio: isAudio)
-                ordered.append(StreamQuality(id: id, name: display, url: url, isAudioOnly: isAudio))
+                ordered.append(StreamQuality(
+                    id: id,
+                    name: display,
+                    url: url,
+                    isAudioOnly: isAudio,
+                    bitrate: pendingBitrate
+                ))
                 pendingName = nil
                 pendingID = nil
                 pendingIsSource = false
                 pendingHasResolution = false
+                pendingBitrate = 0
             }
         }
-        return ordered
+        return ordered.sorted { lhs, rhs in
+            if lhs.isAudioOnly != rhs.isAudioOnly { return !lhs.isAudioOnly }
+            if lhs.bitrate != rhs.bitrate { return lhs.bitrate > rhs.bitrate }
+            return lhs.name < rhs.name
+        }
     }
 
     /// Extracts a quoted or bare attribute value from an HLS tag line.
