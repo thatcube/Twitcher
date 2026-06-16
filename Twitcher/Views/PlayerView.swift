@@ -49,11 +49,12 @@ struct PlayerView: View {
     @State private var showControls = false
     @State private var captionsOn = false
     @State private var streamTitle: String = ""
+    @State private var chatDraft: String = ""
     @State private var hideTask: Task<Void, Never>?
 
     @FocusState private var focus: Focusable?
     private enum Focusable: Hashable {
-        case video, quality, captions, chatToggle, errorBack
+        case video, quality, captions, chatToggle, chatInput, errorBack
         case qualityOption(Int)
     }
 
@@ -215,8 +216,14 @@ struct PlayerView: View {
                 .onMoveCommand { direction in
                     switch direction {
                     case .left: focus = .captions
+                    case .right:
+                        focus = showChat ? .chatInput : .chatToggle
                     default: break
                     }
+                }
+
+                if showChat {
+                    chatInputField
                 }
             }
             .buttonStyle(.bordered)
@@ -255,9 +262,33 @@ struct PlayerView: View {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard !showQualityPicker else { return }
+                guard focus != .chatInput else { return }
                 hideControls()
             }
         }
+    }
+
+    private var chatInputField: some View {
+        TextField("Send a message", text: $chatDraft)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(width: 280)
+            .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(.white.opacity(0.24), lineWidth: 1)
+            )
+            .focused($focus, equals: .chatInput)
+            .onMoveCommand { direction in
+                switch direction {
+                case .left: focus = .chatToggle
+                default: break
+                }
+            }
+            .onSubmit {
+                // Sending chat is not implemented yet; keep typed text local.
+                scheduleHide()
+            }
     }
 
     // MARK: - Quality picker
@@ -359,27 +390,42 @@ struct PlayerView: View {
             options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
         )
         let item = AVPlayerItem(asset: asset)
-        applyCaptions(to: item)
+        applyCaptions(to: item, retries: 12)
         return item
     }
 
     /// Applies the current captions preference to the active item.
     private func applyCaptions() {
-        if let item = player.currentItem { applyCaptions(to: item) }
+        if let item = player.currentItem { applyCaptions(to: item, retries: 12) }
     }
 
     /// Turns the in-band/closed captions on or off for a given item. Twitch
     /// streams carry CEA-608 captions in the legible selection group; we
     /// explicitly deselect them so they default off and can be toggled.
-    private func applyCaptions(to item: AVPlayerItem) {
+    ///
+    /// The legible group can appear slightly after playback starts, so we retry
+    /// for a short window instead of failing one-shot.
+    private func applyCaptions(to item: AVPlayerItem, retries: Int) {
         let wantCaptions = captionsOn
         Task {
-            guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) else { return }
-            await MainActor.run {
-                if wantCaptions, let option = group.options.first {
-                    item.select(option, in: group)
-                } else {
-                    item.select(nil, in: group)
+            for attempt in 0...retries {
+                if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) {
+                    await MainActor.run {
+                        if wantCaptions {
+                            item.selectMediaOptionAutomatically(in: group)
+                            if item.currentMediaSelection.selectedMediaOption(in: group) == nil,
+                               let option = group.options.first {
+                                item.select(option, in: group)
+                            }
+                        } else {
+                            item.select(nil, in: group)
+                        }
+                    }
+                    return
+                }
+
+                if attempt < retries {
+                    try? await Task.sleep(for: .milliseconds(350))
                 }
             }
         }
