@@ -25,6 +25,11 @@ Required sequence:
 3. Launch app on Apple TV.
 4. Report deployment outcome.
 
+Critical detail:
+- For Apple TV testing, always run a fresh device build immediately before install:
+	`xcodebuild -project Twitcher.xcodeproj -scheme Twitcher -destination "platform=tvOS,id=<DEVICE_ID>" build`
+- Do not rely on `CODESIGNING_FOLDER_PATH` install alone without that build step, or an older app binary can be installed.
+
 ## Apple TV target
 
 - Device ID: `DE913871-CC2D-5F75-B4F2-0D6F44AA30DE`

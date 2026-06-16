@@ -25,6 +25,11 @@ Required workflow after any code change:
 3. Launch app on Apple TV.
 4. Report deployment result (success/failure) in the response.
 
+Critical detail:
+- For Apple TV validation, always run a fresh device build immediately before install:
+	`xcodebuild -project Twitcher.xcodeproj -scheme Twitcher -destination "platform=tvOS,id=<DEVICE_ID>" build`
+- Do not install from `CODESIGNING_FOLDER_PATH` without that preceding device build, or a stale bundle may be deployed.
+
 ## Apple TV deployment command pattern
 
 Use this reliable pattern to avoid stale DerivedData paths:
