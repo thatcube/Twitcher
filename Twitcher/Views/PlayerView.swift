@@ -1,18 +1,19 @@
 import SwiftUI
 import AVKit
 
-/// Full-screen video player for a live channel. Resolves the HLS URL via
-/// PlaybackService, then plays it with AVPlayer. This closes Phase 0 on device.
+/// Full-screen video player for a live channel, with a read-only chat overlay.
+/// Resolves the HLS URL via PlaybackService, then plays it with AVPlayer.
 struct PlayerView: View {
     let channel: String
 
     @Environment(\.dismiss) private var dismiss
+    @State private var chat = ChatService()
     @State private var player: AVPlayer?
     @State private var errorMessage: String?
     @State private var isLoading = true
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .trailing) {
             Color.black.ignoresSafeArea()
 
             if let player {
@@ -35,10 +36,20 @@ struct PlayerView: View {
                         .buttonStyle(.borderedProminent)
                 }
                 .padding()
+            } else {
+                ChatView(channel: channel, messages: chat.messages, isConnected: chat.isConnected)
+                    .frame(width: 480)
+                    .frame(maxHeight: .infinity)
             }
         }
-        .task { await load() }
-        .onDisappear { player?.pause() }
+        .task {
+            chat.connect(to: channel)
+            await load()
+        }
+        .onDisappear {
+            player?.pause()
+            chat.disconnect()
+        }
     }
 
     private func load() async {
@@ -46,7 +57,14 @@ struct PlayerView: View {
         errorMessage = nil
         do {
             let url = try await PlaybackService.hlsURL(for: channel)
-            let player = AVPlayer(url: url)
+            // AVURLAsset carries the Twitch headers to every variant/segment request,
+            // so adaptive quality switching works across all CDNs.
+            let asset = AVURLAsset(
+                url: url,
+                options: ["AVURLAssetHTTPHeaderFieldsKey": PlaybackService.streamHeaders]
+            )
+            let item = AVPlayerItem(asset: asset)
+            let player = AVPlayer(playerItem: item)
             self.player = player
             player.play()
             isLoading = false

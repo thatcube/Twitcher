@@ -28,6 +28,16 @@ struct PlaybackService {
     private static let accessTokenHash = "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9"
     private static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
+    /// Headers to attach to the AVURLAsset so every variant playlist and media
+    /// segment (across Twitch's CDNs and all quality levels) is fetched with the
+    /// same identity AVPlayer used for the master playlist. AVPlayer handles
+    /// adaptive bitrate (quality switching) automatically from the master playlist.
+    static let streamHeaders: [String: String] = [
+        "Referer": "https://player.twitch.tv",
+        "Origin": "https://player.twitch.tv",
+        "User-Agent": userAgent,
+    ]
+
     private struct Token {
         let value: String
         let signature: String
