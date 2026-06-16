@@ -6,6 +6,7 @@ struct ChatView: View {
     let channel: String
     let messages: [ChatMessage]
     var isConnected: Bool = false
+    var emoteURLs: [String: URL] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,8 +24,6 @@ struct ChatView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "bubble.left.and.bubble.right.fill")
-                .foregroundStyle(isConnected ? .green : .secondary)
             Text(channel)
                 .font(.headline)
                 .lineLimit(1)
@@ -64,14 +63,12 @@ struct ChatView: View {
         }
     }
 
-    private func line(for message: ChatMessage) -> Text {
-        let name = Text(message.username)
-            .fontWeight(.bold)
-            .foregroundColor(color(for: message))
-        let body = Text(message.isAction ? message.text : " \(message.text)")
-            .foregroundColor(message.isAction ? color(for: message) : .white)
-        return (name + Text(message.isAction ? " " : ":") + body)
-            .font(.system(size: 26))
+    private func line(for message: ChatMessage) -> some View {
+        RichChatLineView(
+            message: message,
+            nameColor: color(for: message),
+            emoteURLs: emoteURLs
+        )
     }
 
     /// Use the user's Twitch color, or a stable color derived from their name.

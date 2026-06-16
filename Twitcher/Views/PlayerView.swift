@@ -264,7 +264,8 @@ struct PlayerView: View {
             ChatView(
                 channel: channel,
                 messages: chat.messages,
-                isConnected: chat.isConnected
+                isConnected: chat.isConnected,
+                emoteURLs: chat.emoteURLs
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -276,9 +277,6 @@ struct PlayerView: View {
 
     private var chatComposerBar: some View {
         HStack(spacing: 10) {
-            Image(systemName: "bubble.left.and.bubble.right.fill")
-                .foregroundStyle(.green)
-
             TextField("Send a message", text: $chatDraft)
                 .textFieldStyle(.plain)
                 .focused($focus, equals: .chatInput)

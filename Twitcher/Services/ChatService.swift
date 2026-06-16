@@ -12,6 +12,7 @@ final class ChatService {
     /// Rolling buffer of the most recent messages (oldest first).
     private(set) var messages: [ChatMessage] = []
     private(set) var isConnected = false
+    private(set) var emoteURLs: [String: URL] = [:]
 
     private let endpoint = URL(string: "wss://irc-ws.chat.twitch.tv:443")!
     private let maxMessages = 250
@@ -25,6 +26,7 @@ final class ChatService {
         disconnect()
         let normalized = channel.lowercased()
         self.channel = normalized
+        emoteURLs = [:]
 
         let task = URLSession(configuration: .default).webSocketTask(with: endpoint)
         socket = task
@@ -33,6 +35,13 @@ final class ChatService {
         send("NICK justinfan\(Int.random(in: 10_000..<99_999))")
         send("CAP REQ :twitch.tv/tags")
         send("JOIN #\(normalized)")
+
+        Task { [weak self] in
+            guard let self else { return }
+            let catalog = await EmoteCatalogService.shared.catalog(for: normalized)
+            guard self.channel == normalized else { return }
+            self.emoteURLs = catalog
+        }
 
         receiveTask = Task { [weak self] in await self?.receiveLoop() }
     }
@@ -45,6 +54,7 @@ final class ChatService {
         socket = nil
         isConnected = false
         messages.removeAll()
+        emoteURLs.removeAll()
         channel = nil
     }
 
