@@ -23,6 +23,21 @@ enum PlaybackError: LocalizedError {
     }
 }
 
+/// One selectable quality from the HLS master playlist (e.g. "1080p60", "720p", "Audio Only").
+struct StreamQuality: Identifiable, Hashable {
+    let id: String        // HLS group-id, e.g. "chunked", "720p60", "audio_only"
+    let name: String      // display name, e.g. "1080p60 (Source)"
+    let url: URL          // direct media-playlist URL for this single quality
+    let isAudioOnly: Bool
+}
+
+/// Result of resolving a channel: the master (adaptive/"Auto") playlist plus the
+/// individual quality variants parsed from it, ordered best → worst.
+struct StreamPlayback {
+    let master: URL
+    let qualities: [StreamQuality]
+}
+
 struct PlaybackService {
     private static let clientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
     private static let accessTokenHash = "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9"
@@ -50,6 +65,15 @@ struct PlaybackService {
         // Validate the playlist is reachable before handing it to AVPlayer.
         try await validatePlaylist(usher)
         return usher
+    }
+
+    /// Resolves a channel to its master playlist plus the list of selectable
+    /// quality variants parsed from that playlist.
+    static func resolve(for channel: String) async throws -> StreamPlayback {
+        let token = try await fetchAccessToken(channel: channel)
+        let master = buildUsherURL(channel: channel, token: token)
+        let qualities = try await fetchQualities(master)
+        return StreamPlayback(master: master, qualities: qualities)
     }
 
     private static func fetchAccessToken(channel: String) async throws -> Token {
@@ -113,12 +137,79 @@ struct PlaybackService {
 
     private static func validatePlaylist(_ url: URL) async throws {
         var req = URLRequest(url: url)
-        req.setValue("https://player.twitch.tv", forHTTPHeaderField: "Referer")
-        req.setValue("https://player.twitch.tv", forHTTPHeaderField: "Origin")
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        for (k, v) in streamHeaders { req.setValue(v, forHTTPHeaderField: k) }
         let (_, response) = try await URLSession.shared.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         if status == 404 { throw PlaybackError.offline }
         guard (200...299).contains(status) else { throw PlaybackError.http(status) }
+    }
+
+    /// Fetches the master playlist and parses its variants into `StreamQuality` values.
+    /// Also doubles as reachability validation (throws if offline/unreachable).
+    private static func fetchQualities(_ master: URL) async throws -> [StreamQuality] {
+        var req = URLRequest(url: master)
+        for (k, v) in streamHeaders { req.setValue(v, forHTTPHeaderField: k) }
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        if status == 404 { throw PlaybackError.offline }
+        guard (200...299).contains(status) else { throw PlaybackError.http(status) }
+
+        let text = String(decoding: data, as: UTF8.self)
+        return parseMaster(text)
+    }
+
+    /// Parses a Twitch HLS master playlist. Each video rendition is described by an
+    /// `#EXT-X-MEDIA:TYPE=VIDEO` line (GROUP-ID + NAME) followed by an
+    /// `#EXT-X-STREAM-INF` line referencing that group via `VIDEO="..."` and then the URL.
+    static func parseMaster(_ text: String) -> [StreamQuality] {
+        var names: [String: String] = [:]   // group-id -> display name
+        var ordered: [StreamQuality] = []
+        let lines = text.components(separatedBy: .newlines)
+
+        var pendingGroup: String?
+        for raw in lines {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("#EXT-X-MEDIA:") && line.contains("TYPE=VIDEO") {
+                if let group = attribute("GROUP-ID", in: line) {
+                    names[group] = attribute("NAME", in: line) ?? group
+                }
+            } else if line.hasPrefix("#EXT-X-STREAM-INF:") {
+                pendingGroup = attribute("VIDEO", in: line)
+            } else if !line.isEmpty, !line.hasPrefix("#"), let url = URL(string: line) {
+                let group = pendingGroup ?? "chunked"
+                let isAudio = group.lowercased().contains("audio")
+                let display = displayName(names[group] ?? group, group: group, isAudio: isAudio)
+                ordered.append(StreamQuality(id: group, name: display, url: url, isAudioOnly: isAudio))
+                pendingGroup = nil
+            }
+        }
+        return ordered
+    }
+
+    /// Extracts a quoted or bare attribute value from an HLS tag line.
+    private static func attribute(_ key: String, in line: String) -> String? {
+        guard let range = line.range(of: "\(key)=") else { return nil }
+        let rest = line[range.upperBound...]
+        if rest.first == "\"" {
+            let afterQuote = rest.dropFirst()
+            if let end = afterQuote.firstIndex(of: "\"") {
+                return String(afterQuote[..<end])
+            }
+            return nil
+        }
+        let end = rest.firstIndex(of: ",") ?? rest.endIndex
+        return String(rest[..<end])
+    }
+
+    /// Normalizes Twitch's rendition name into a clean display label.
+    private static func displayName(_ name: String, group: String, isAudio: Bool) -> String {
+        if isAudio { return "Audio Only" }
+        // The source rendition's group is "chunked"; tag it as Source.
+        if group == "chunked" {
+            let base = name.replacingOccurrences(of: " (source)", with: "")
+                           .replacingOccurrences(of: " (Source)", with: "")
+            return "\(base) (Source)"
+        }
+        return name
     }
 }

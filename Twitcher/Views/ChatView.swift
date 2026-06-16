@@ -13,7 +13,12 @@ struct ChatView: View {
             Divider().overlay(.white.opacity(0.15))
             messageList
         }
-        .background(.ultraThinMaterial)
+        .background(Color(white: 0.07).opacity(0.96))
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(.white.opacity(0.12))
+                .frame(width: 1)
+        }
     }
 
     private var header: some View {
