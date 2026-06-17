@@ -3,7 +3,14 @@ import SwiftUI
 struct HomeView: View {
   private let pagePadding: CGFloat = 52
   private let channelRailVerticalPadding: CGFloat = 20
-  private let channelRailSpacing: CGFloat = 52
+  private let targetVisibleCards: CGFloat = 5
+  private let peekCardFraction: CGFloat = 0.3
+  private let focusHorizontalInset: CGFloat = 12
+  private let focusVerticalInset: CGFloat = 10
+  private let cardCornerRadius: CGFloat = 22
+  private let mediaCornerRadius: CGFloat = 18
+  private let minMediaWidth: CGFloat = 220
+  private let maxMediaWidth: CGFloat = 560
   private let focusedCardScale: CGFloat = 1.02
 
   @State private var selectedTopTab: TopTab = .home
@@ -18,6 +25,12 @@ struct HomeView: View {
     case home = "Home"
 
     var id: String { rawValue }
+  }
+
+  private struct ChannelRailMetrics {
+    let spacing: CGFloat
+    let mediaWidth: CGFloat
+    let mediaHeight: CGFloat
   }
 
   var body: some View {
@@ -80,41 +93,53 @@ struct HomeView: View {
   }
 
   private var homeTab: some View {
-    VStack(alignment: .leading, spacing: 24) {
-      authBanner
+    GeometryReader { proxy in
+      let rail = channelRailMetrics(for: proxy.size.width)
 
-      HStack {
-        Text(follows.isUsingDemoData ? "Trending" : "Following")
-          .font(.title.weight(.bold))
+      VStack(alignment: .leading, spacing: 24) {
+        authBanner
 
-        if follows.isLoading {
-          ProgressView()
-            .scaleEffect(0.85)
-        }
+        HStack {
+          Text(follows.isUsingDemoData ? "Trending" : "Following")
+            .font(.title.weight(.bold))
 
-        Spacer()
+          if follows.isLoading {
+            ProgressView()
+              .scaleEffect(0.85)
+          }
 
-        Button("Refresh") {
-          Task {
-            await follows.refresh(using: auth)
-            requestFocusIfPossible(force: true)
+          Spacer()
+
+          Button("Refresh") {
+            Task {
+              await follows.refresh(using: auth)
+              requestFocusIfPossible(force: true)
+            }
           }
         }
-      }
 
-      if let errorMessage = follows.errorMessage {
-        Text(errorMessage)
-          .font(.footnote)
-          .foregroundStyle(.orange)
-      }
+        if let errorMessage = follows.errorMessage {
+          Text(errorMessage)
+            .font(.footnote)
+            .foregroundStyle(.orange)
+        }
 
-      ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: channelRailSpacing) {
-          ForEach(follows.channels) { channel in
-            let isFocused = focusedChannelID == channel.id
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: rail.spacing) {
+            ForEach(follows.channels) { channel in
+              let isFocused = focusedChannelID == channel.id
 
-            FollowedChannelCard(channel: channel, isFocused: isFocused)
-              .contentShape(RoundedRectangle(cornerRadius: 18))
+              FollowedChannelCard(
+                channel: channel,
+                isFocused: isFocused,
+                mediaWidth: rail.mediaWidth,
+                mediaHeight: rail.mediaHeight,
+                focusHorizontalInset: focusHorizontalInset,
+                focusVerticalInset: focusVerticalInset,
+                cardCornerRadius: cardCornerRadius,
+                mediaCornerRadius: mediaCornerRadius
+              )
+              .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
               .focusable(true)
               .focused($focusedChannelID, equals: channel.id)
               .focusEffectDisabled()
@@ -125,19 +150,38 @@ struct HomeView: View {
               .scaleEffect(isFocused ? focusedCardScale : 1)
               .animation(.easeOut(duration: 0.14), value: isFocused)
               .zIndex(isFocused ? 2 : 0)
+            }
           }
+          .padding(.vertical, channelRailVerticalPadding)
         }
-        .padding(.vertical, channelRailVerticalPadding)
-      }
-      .scrollClipDisabled()
+        .scrollClipDisabled()
 
-      if follows.channels.isEmpty {
-        Text(follows.isUsingDemoData ? "No trending channels are available right now." : "No followed channels are available yet.")
-          .foregroundStyle(.secondary)
-      }
+        if follows.channels.isEmpty {
+          Text(follows.isUsingDemoData ? "No trending channels are available right now." : "No followed channels are available yet.")
+            .foregroundStyle(.secondary)
+        }
 
-      Spacer(minLength: 0)
+        Spacer(minLength: 0)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
+  }
+
+  private func channelRailMetrics(for availableWidth: CGFloat) -> ChannelRailMetrics {
+    let width = max(availableWidth, 1)
+    let spacing = max(18, min(32, width * 0.012))
+    let rawOuterCardWidth = (width - ((targetVisibleCards - 1) * spacing)) / (targetVisibleCards + peekCardFraction)
+    let minOuterCardWidth = minMediaWidth + (focusHorizontalInset * 2)
+    let maxOuterCardWidth = maxMediaWidth + (focusHorizontalInset * 2)
+    let outerCardWidth = min(max(rawOuterCardWidth, minOuterCardWidth), maxOuterCardWidth)
+    let mediaWidth = outerCardWidth - (focusHorizontalInset * 2)
+    let mediaHeight = mediaWidth * 9 / 16
+
+    return ChannelRailMetrics(
+      spacing: spacing,
+      mediaWidth: mediaWidth,
+      mediaHeight: mediaHeight
+    )
   }
 
   private var authBanner: some View {
@@ -217,15 +261,14 @@ struct HomeView: View {
 }
 
 private struct FollowedChannelCard: View {
-  private let mediaWidth: CGFloat = 560
-  private let mediaHeight: CGFloat = 315
-  private let focusHorizontalInset: CGFloat = 12
-  private let focusVerticalInset: CGFloat = 10
-  private let cardCornerRadius: CGFloat = 22
-  private let mediaCornerRadius: CGFloat = 18
-
   let channel: FollowedChannel
   let isFocused: Bool
+  let mediaWidth: CGFloat
+  let mediaHeight: CGFloat
+  let focusHorizontalInset: CGFloat
+  let focusVerticalInset: CGFloat
+  let cardCornerRadius: CGFloat
+  let mediaCornerRadius: CGFloat
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
