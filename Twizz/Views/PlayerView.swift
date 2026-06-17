@@ -42,6 +42,7 @@ struct PlayerView: View {
   @AppStorage("preferredQuality") private var preferredQuality = "Auto"
   @AppStorage("chatReadabilityMode") private var chatReadabilityModeRaw = ChatReadabilityMode
     .balanced.rawValue
+  @AppStorage("chatWidthMode") private var chatWidthModeRaw = ChatWidthMode.medium.rawValue
 
   @State private var chat = ChatService()
   @State private var player = AVPlayer()
@@ -51,7 +52,7 @@ struct PlayerView: View {
   @State private var showChat = true
   @State private var showQualityPicker = false
   @State private var showCaptionsPicker = false
-  @State private var showChatSettingsPicker = false
+  @State private var showChatSettings = false
   @State private var showControls = false
   @State private var captionsOn = UIAccessibility.isClosedCaptioningEnabled
   @State private var captionGroup: AVMediaSelectionGroup?
@@ -106,16 +107,24 @@ struct PlayerView: View {
 
   @FocusState private var focus: Focusable?
   private enum Focusable: Hashable {
-    case video, streamInfo, quality, captions, chatToggle, chatSettings, chatInput, errorBack
+    case video, streamInfo, quality, captions, chatToggle, chatInput, errorBack
+    case chatSettingsButton
     case qualityOption(Int)
     case captionsOption(Int)
     case chatSettingsModeOption(Int)
+    case chatWidthOption(Int)
   }
-
-  private let chatWidth: CGFloat = 460
 
   private var chatReadabilityMode: ChatReadabilityMode {
     ChatReadabilityMode(rawValue: chatReadabilityModeRaw) ?? .balanced
+  }
+
+  private var chatWidthMode: ChatWidthMode {
+    ChatWidthMode(rawValue: chatWidthModeRaw) ?? .medium
+  }
+
+  private var chatWidth: CGFloat {
+    chatWidthMode.width
   }
 
   var body: some View {
@@ -139,10 +148,6 @@ struct PlayerView: View {
 
       if showCaptionsPicker {
         captionsPicker
-      }
-
-      if showChatSettingsPicker {
-        chatSettingsPicker
       }
     }
     .task {
@@ -175,10 +180,9 @@ struct PlayerView: View {
         showCaptionsPicker = false
         focus = .captions
         scheduleHide()
-      } else if showChatSettingsPicker {
-        showChatSettingsPicker = false
-        focus = .chatSettings
-        scheduleHide()
+      } else if showChatSettings {
+        showChatSettings = false
+        focus = .chatSettingsButton
       } else if showControls {
         hideControls()
       } else {
@@ -186,7 +190,7 @@ struct PlayerView: View {
       }
     }
     .onMoveCommand { direction in
-      guard !showQualityPicker, !showCaptionsPicker, !showChatSettingsPicker else { return }
+      guard !showQualityPicker, !showCaptionsPicker else { return }
 
       if !showControls {
         // Directional movement should immediately surface controls and
@@ -199,7 +203,7 @@ struct PlayerView: View {
     .onChange(of: focus) { _, newFocus in
       // Keep control navigation deterministic: if tvOS drops focus to nil
       // while controls are visible, immediately restore last valid control.
-      guard showControls, !showQualityPicker, !showCaptionsPicker, !showChatSettingsPicker else {
+      guard showControls, !showQualityPicker, !showCaptionsPicker else {
         return
       }
 
@@ -221,7 +225,7 @@ struct PlayerView: View {
       VideoSurface(player: player)
         .ignoresSafeArea()
 
-      if showControls, !showQualityPicker, !showCaptionsPicker, !showChatSettingsPicker, !isLoading,
+      if showControls, !showQualityPicker, !showCaptionsPicker, !isLoading,
         errorMessage == nil
       {
         VStack {
@@ -238,7 +242,7 @@ struct PlayerView: View {
       // Only expose the video focus target while controls are hidden.
       // Otherwise, left-edge movement from the control cluster can escape
       // into this invisible target and appear as lost focus.
-      if !showControls && !showQualityPicker && !showChatSettingsPicker {
+      if !showControls && !showQualityPicker {
         Color.clear
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .contentShape(Rectangle())
@@ -263,7 +267,7 @@ struct PlayerView: View {
         }
         .padding(40)
         .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 24))
-      } else if showControls && !showQualityPicker && !showChatSettingsPicker {
+      } else if showControls && !showQualityPicker {
         bottomOverlay
       }
     }
@@ -327,7 +331,6 @@ struct PlayerView: View {
         Button {
           showQualityPicker = true
           showCaptionsPicker = false
-          showChatSettingsPicker = false
           hideTask?.cancel()
         } label: {
           Label("Quality", systemImage: "gauge.with.dots.needle.67percent")
@@ -347,7 +350,6 @@ struct PlayerView: View {
 
         Button {
           showQualityPicker = false
-          showChatSettingsPicker = false
           prepareCaptionsPicker()
         } label: {
           Label(
@@ -386,27 +388,6 @@ struct PlayerView: View {
           switch direction {
           case .left:
             focus = .captions
-          case .right:
-            focus = .chatSettings
-          default:
-            break
-          }
-        }
-
-        Button {
-          showQualityPicker = false
-          showCaptionsPicker = false
-          showChatSettingsPicker = true
-          hideTask?.cancel()
-        } label: {
-          Label("Chat Settings", systemImage: "line.3.horizontal.decrease.circle")
-            .labelStyle(.iconOnly)
-        }
-        .focused($focus, equals: .chatSettings)
-        .onMoveCommand { direction in
-          switch direction {
-          case .left:
-            focus = .chatToggle
           case .right:
             if showChat {
               focus = .chatInput
@@ -498,7 +479,6 @@ struct PlayerView: View {
       await MainActor.run {
         guard !showQualityPicker else { return }
         guard !showCaptionsPicker else { return }
-        guard !showChatSettingsPicker else { return }
         hideControls()
       }
     }
@@ -506,7 +486,7 @@ struct PlayerView: View {
 
   private func isControlFocus(_ focus: Focusable) -> Bool {
     switch focus {
-    case .streamInfo, .quality, .captions, .chatToggle, .chatSettings, .chatInput:
+    case .streamInfo, .quality, .captions, .chatToggle, .chatInput:
       return true
     default:
       return false
@@ -525,11 +505,119 @@ struct PlayerView: View {
         condensedMessagesCount: chat.condensedMessagesCount
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .overlay(alignment: .topTrailing) {
+        chatSettingsFloating
+          .padding(.top, 16)
+          .padding(.trailing, 16)
+      }
 
       chatComposerBar
     }
     .frame(width: chatWidth)
     .frame(maxHeight: .infinity)
+  }
+
+  // MARK: - Floating chat settings
+
+  /// A compact settings control that floats in the top-right of the chat.
+  /// It is only reachable by pressing up from the chat input, so it never
+  /// steals focus while the user is scrolling or typing.
+  private var chatSettingsFloating: some View {
+    VStack(alignment: .trailing, spacing: 14) {
+      Button {
+        toggleChatSettings()
+      } label: {
+        Image(systemName: showChatSettings ? "xmark" : "slider.horizontal.3")
+          .font(.system(size: 22, weight: .semibold))
+          .frame(width: 30, height: 30)
+      }
+      .TwizzControlButtonStyle()
+      .focused($focus, equals: .chatSettingsButton)
+      .onMoveCommand { direction in
+        if direction == .down, !showChatSettings {
+          focus = .chatInput
+        }
+      }
+
+      if showChatSettings {
+        chatSettingsPanel
+          .transition(.move(edge: .top).combined(with: .opacity))
+      }
+    }
+    .animation(.easeOut(duration: 0.18), value: showChatSettings)
+  }
+
+  private var chatSettingsPanel: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Readability")
+          .font(.headline)
+          .foregroundStyle(.white)
+
+        HStack(spacing: 10) {
+          ForEach(Array(ChatReadabilityMode.allCases.enumerated()), id: \.offset) { index, mode in
+            Button {
+              selectChatReadabilityMode(at: index)
+            } label: {
+              Text(mode.title)
+                .font(.callout)
+            }
+            .buttonStyle(.bordered)
+            .background(
+              mode == chatReadabilityMode
+                ? Color.accentColor.opacity(0.35) : Color.clear,
+              in: RoundedRectangle(cornerRadius: 12)
+            )
+            .focused($focus, equals: .chatSettingsModeOption(index))
+          }
+        }
+        .focusSection()
+      }
+
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Chat Width")
+          .font(.headline)
+          .foregroundStyle(.white)
+
+        HStack(spacing: 10) {
+          ForEach(Array(ChatWidthMode.allCases.enumerated()), id: \.offset) { index, mode in
+            Button {
+              selectChatWidthMode(at: index)
+            } label: {
+              Text(mode.title)
+                .font(.callout)
+            }
+            .buttonStyle(.bordered)
+            .background(
+              mode == chatWidthMode
+                ? Color.accentColor.opacity(0.35) : Color.clear,
+              in: RoundedRectangle(cornerRadius: 12)
+            )
+            .focused($focus, equals: .chatWidthOption(index))
+          }
+        }
+        .focusSection()
+      }
+    }
+    .padding(24)
+    .frame(width: 360, alignment: .leading)
+    .background(Color(white: 0.12).opacity(0.98), in: RoundedRectangle(cornerRadius: 22))
+    .focusSection()
+  }
+
+  private func toggleChatSettings() {
+    showChatSettings.toggle()
+    if showChatSettings {
+      let selected = ChatReadabilityMode.allCases.firstIndex(of: chatReadabilityMode) ?? 0
+      focus = .chatSettingsModeOption(selected)
+    } else {
+      focus = .chatSettingsButton
+    }
+  }
+
+  private func selectChatWidthMode(at index: Int) {
+    guard ChatWidthMode.allCases.indices.contains(index) else { return }
+    chatWidthModeRaw = ChatWidthMode.allCases[index].rawValue
   }
 
   private var chatComposerBar: some View {
@@ -541,6 +629,8 @@ struct PlayerView: View {
           switch direction {
           case .left:
             revealControls(preferredFocus: .chatToggle)
+          case .up:
+            focus = .chatSettingsButton
           case .right:
             focus = .chatInput
           default:
@@ -658,52 +748,6 @@ struct PlayerView: View {
     }
   }
 
-  private var chatSettingsPicker: some View {
-    ZStack {
-      Color.black.opacity(0.5).ignoresSafeArea()
-
-      VStack(alignment: .leading, spacing: 10) {
-        Text("Chat Readability")
-          .font(.title2).bold()
-          .padding(.bottom, 8)
-
-        Text("Comfortable shows fewer lines per second. Compact keeps more live flow.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-
-        Text("Smart Filtering and Collapse Repeats are currently disabled.")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .padding(.bottom, 4)
-
-        ForEach(Array(ChatReadabilityMode.allCases.enumerated()), id: \.offset) { index, mode in
-          Button {
-            selectChatReadabilityMode(at: index)
-          } label: {
-            HStack {
-              Text(mode.title)
-              Spacer()
-              if mode == chatReadabilityMode {
-                Image(systemName: "checkmark")
-              }
-            }
-            .frame(width: 460)
-          }
-          .buttonStyle(.bordered)
-          .focused($focus, equals: .chatSettingsModeOption(index))
-        }
-
-      }
-      .padding(40)
-      .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 28))
-      .focusSection()
-    }
-    .onAppear {
-      let selectedIndex = ChatReadabilityMode.allCases.firstIndex(of: chatReadabilityMode) ?? 0
-      focus = .chatSettingsModeOption(selectedIndex)
-    }
-  }
-
   private var qualityOptions: [String] {
     ["Auto"] + (playback?.qualities.map(\.name) ?? [])
   }
@@ -711,7 +755,6 @@ struct PlayerView: View {
   private func selectChatReadabilityMode(at index: Int) {
     guard ChatReadabilityMode.allCases.indices.contains(index) else { return }
     chatReadabilityModeRaw = ChatReadabilityMode.allCases[index].rawValue
-    scheduleHide()
   }
 
   private func selectQuality(at index: Int) {
@@ -1015,8 +1058,7 @@ struct PlayerView: View {
   }
 
   private func samplePlaybackHealth() {
-    guard !isLoading, errorMessage == nil, !showQualityPicker, !showCaptionsPicker,
-      !showChatSettingsPicker
+    guard !isLoading, errorMessage == nil, !showQualityPicker, !showCaptionsPicker
     else {
       stalledPlaybackSamples = 0
       lastObservedPlaybackTimeSeconds = nil

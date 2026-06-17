@@ -71,6 +71,32 @@ enum ChatReadabilityMode: String, CaseIterable {
     }
 }
 
+/// User-adjustable width of the docked chat panel.
+enum ChatWidthMode: String, CaseIterable {
+    case narrow
+    case medium
+    case wide
+    case extraWide
+
+    var title: String {
+        switch self {
+        case .narrow: return "Narrow"
+        case .medium: return "Medium"
+        case .wide: return "Wide"
+        case .extraWide: return "Extra Wide"
+        }
+    }
+
+    var width: CGFloat {
+        switch self {
+        case .narrow: return 380
+        case .medium: return 460
+        case .wide: return 560
+        case .extraWide: return 680
+        }
+    }
+}
+
 private struct ChatReadabilityConfig: Equatable {
     var mode: ChatReadabilityMode = .balanced
     var smartFilteringEnabled = true
