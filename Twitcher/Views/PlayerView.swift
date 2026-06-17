@@ -41,8 +41,6 @@ struct PlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("preferredQuality") private var preferredQuality = "Auto"
     @AppStorage("chatReadabilityMode") private var chatReadabilityModeRaw = ChatReadabilityMode.balanced.rawValue
-    @AppStorage("chatSmartFilteringEnabled") private var chatSmartFilteringEnabled = true
-    @AppStorage("chatCollapseRepeatsEnabled") private var chatCollapseRepeatsEnabled = true
 
     @State private var chat = ChatService()
     @State private var player = AVPlayer()
@@ -111,8 +109,6 @@ struct PlayerView: View {
         case qualityOption(Int)
         case captionsOption(Int)
         case chatSettingsModeOption(Int)
-        case chatSettingsSmartFilter
-        case chatSettingsCollapseRepeats
     }
 
     private let chatWidth: CGFloat = 460
@@ -211,12 +207,6 @@ struct PlayerView: View {
             }
         }
         .onChange(of: chatReadabilityModeRaw) { _, _ in
-            applyChatReadabilitySettings()
-        }
-        .onChange(of: chatSmartFilteringEnabled) { _, _ in
-            applyChatReadabilitySettings()
-        }
-        .onChange(of: chatCollapseRepeatsEnabled) { _, _ in
             applyChatReadabilitySettings()
         }
     }
@@ -519,6 +509,7 @@ struct PlayerView: View {
             ChatView(
                 channel: channel,
                 messages: chat.messages,
+                readabilityMode: chatReadabilityMode,
                 isConnected: chat.isConnected,
                 emoteURLs: chat.emoteURLs,
                 badgeURLs: chat.badgeURLs,
@@ -666,6 +657,15 @@ struct PlayerView: View {
                     .font(.title2).bold()
                     .padding(.bottom, 8)
 
+                Text("Comfortable shows fewer lines per second. Compact keeps more live flow.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Smart Filtering and Collapse Repeats are currently disabled.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 4)
+
                 ForEach(Array(ChatReadabilityMode.allCases.enumerated()), id: \.offset) { index, mode in
                     Button {
                         selectChatReadabilityMode(at: index)
@@ -683,33 +683,6 @@ struct PlayerView: View {
                     .focused($focus, equals: .chatSettingsModeOption(index))
                 }
 
-                Button {
-                    chatSmartFilteringEnabled.toggle()
-                    scheduleHide()
-                } label: {
-                    HStack {
-                        Text("Smart Filtering")
-                        Spacer()
-                        Image(systemName: chatSmartFilteringEnabled ? "checkmark.circle.fill" : "circle")
-                    }
-                    .frame(width: 460)
-                }
-                .buttonStyle(.bordered)
-                .focused($focus, equals: .chatSettingsSmartFilter)
-
-                Button {
-                    chatCollapseRepeatsEnabled.toggle()
-                    scheduleHide()
-                } label: {
-                    HStack {
-                        Text("Collapse Repeats")
-                        Spacer()
-                        Image(systemName: chatCollapseRepeatsEnabled ? "checkmark.circle.fill" : "circle")
-                    }
-                    .frame(width: 460)
-                }
-                .buttonStyle(.bordered)
-                .focused($focus, equals: .chatSettingsCollapseRepeats)
             }
             .padding(40)
             .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 28))
@@ -776,8 +749,8 @@ struct PlayerView: View {
     private func applyChatReadabilitySettings() {
         chat.applyReadabilitySettings(
             mode: chatReadabilityMode,
-            smartFilteringEnabled: chatSmartFilteringEnabled,
-            collapseRepeatsEnabled: chatCollapseRepeatsEnabled
+            smartFilteringEnabled: false,
+            collapseRepeatsEnabled: false
         )
     }
 

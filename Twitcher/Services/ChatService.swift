@@ -1,6 +1,82 @@
 import Foundation
 import Observation
 
+enum ChatReadabilityMode: String, CaseIterable {
+    case comfortable
+    case balanced
+    case compact
+
+    var title: String {
+        switch self {
+        case .comfortable: return "Comfortable"
+        case .balanced: return "Balanced"
+        case .compact: return "Compact"
+        }
+    }
+
+    var renderRatePerSecond: Double {
+        switch self {
+        case .comfortable: return 0.9
+        case .balanced: return 1.3
+        case .compact: return 1.8
+        }
+    }
+
+    var historyLimit: Int {
+        switch self {
+        case .comfortable: return 220
+        case .balanced: return 280
+        case .compact: return 340
+        }
+    }
+
+    var pendingLimit: Int {
+        switch self {
+        case .comfortable: return 120
+        case .balanced: return 180
+        case .compact: return 240
+        }
+    }
+
+    var busyThresholdPerSecond: Double {
+        switch self {
+        case .comfortable: return 1.2
+        case .balanced: return 2.0
+        case .compact: return 3.2
+        }
+    }
+
+    var stormThresholdPerSecond: Double {
+        switch self {
+        case .comfortable: return 3.0
+        case .balanced: return 4.8
+        case .compact: return 8.0
+        }
+    }
+
+    var stormSampleModulo: Int {
+        switch self {
+        case .comfortable: return 4
+        case .balanced: return 3
+        case .compact: return 2
+        }
+    }
+
+    var busySampleModulo: Int {
+        switch self {
+        case .comfortable: return 2
+        case .balanced: return 3
+        case .compact: return 4
+        }
+    }
+}
+
+private struct ChatReadabilityConfig: Equatable {
+    var mode: ChatReadabilityMode = .balanced
+    var smartFilteringEnabled = true
+    var collapseRepeatsEnabled = true
+}
+
 /// Reads a Twitch channel's chat anonymously over IRC-via-WebSocket.
 ///
 /// No login or token required: we connect as a `justinfan` guest, request the
@@ -14,15 +90,37 @@ final class ChatService {
     private(set) var isConnected = false
     private(set) var emoteURLs: [String: URL] = [:]
     private(set) var badgeURLs: [String: URL] = [:]
+    private(set) var condensedMessagesCount = 0
 
     private let endpoint = URL(string: "wss://irc-ws.chat.twitch.tv:443")!
-    private let maxMessages = 250
+    private let rateWindowSeconds: TimeInterval = 4
+    private let repeatWindowSeconds: TimeInterval = 4
 
     private var socket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
+    private var renderTask: Task<Void, Never>?
     private var channel: String?
     private var hasSentJoin = false
     private var hasCapAck = false
+    private var pendingMessages: [ChatMessage] = []
+    private var ingressTimestamps: [Date] = []
+    private var repeatTracker: [String: Date] = [:]
+    private var readabilityConfig = ChatReadabilityConfig()
+    private var lastRenderedAt = Date.distantPast
+    private var samplingCounter = 0
+
+    /// Update the user-preferred chat readability behavior.
+    func applyReadabilitySettings(
+        mode: ChatReadabilityMode,
+        smartFilteringEnabled: Bool,
+        collapseRepeatsEnabled: Bool
+    ) {
+        readabilityConfig.mode = mode
+        readabilityConfig.smartFilteringEnabled = smartFilteringEnabled
+        readabilityConfig.collapseRepeatsEnabled = collapseRepeatsEnabled
+        trimRenderedBufferIfNeeded()
+        trimPendingBufferIfNeeded()
+    }
 
     /// Connect and join `channel` (case-insensitive). Replaces any existing connection.
     func connect(to channel: String) {
@@ -31,6 +129,12 @@ final class ChatService {
         self.channel = normalized
         hasSentJoin = false
         hasCapAck = false
+        pendingMessages.removeAll()
+        ingressTimestamps.removeAll()
+        repeatTracker.removeAll()
+        lastRenderedAt = .distantPast
+        samplingCounter = 0
+        condensedMessagesCount = 0
         emoteURLs = [:]
         badgeURLs = [:]
 
@@ -63,10 +167,16 @@ final class ChatService {
     func disconnect() {
         receiveTask?.cancel()
         receiveTask = nil
+        renderTask?.cancel()
+        renderTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         isConnected = false
         messages.removeAll()
+        pendingMessages.removeAll()
+        ingressTimestamps.removeAll()
+        repeatTracker.removeAll()
+        condensedMessagesCount = 0
         emoteURLs.removeAll()
         badgeURLs.removeAll()
         channel = nil
@@ -124,9 +234,176 @@ final class ChatService {
         }
 
         guard !parsedMessages.isEmpty else { return }
-        messages.append(contentsOf: parsedMessages)
-        if messages.count > maxMessages {
-            messages.removeFirst(messages.count - maxMessages)
+        enqueue(parsedMessages)
+    }
+
+    private func enqueue(_ incoming: [ChatMessage]) {
+        for message in incoming {
+            // Readability filters are intentionally disabled.
+            // We keep all messages and only pace rendering by mode.
+            pendingMessages.append(message)
+        }
+
+        trimPendingBufferIfNeeded()
+        ensureRenderLoop()
+    }
+
+    private func ensureRenderLoop() {
+        guard renderTask == nil else { return }
+
+        renderTask = Task { [weak self] in
+            await self?.runRenderLoop()
+        }
+    }
+
+    private func runRenderLoop() async {
+        while !Task.isCancelled {
+            if pendingMessages.isEmpty {
+                try? await Task.sleep(for: .milliseconds(120))
+                continue
+            }
+
+            let minInterval = 1 / readabilityConfig.mode.renderRatePerSecond
+            let elapsed = Date().timeIntervalSince(lastRenderedAt)
+            if elapsed < minInterval {
+                let remaining = max(0, minInterval - elapsed)
+                try? await Task.sleep(for: .seconds(remaining))
+                continue
+            }
+
+            let message = pendingMessages.removeFirst()
+            messages.append(message)
+            lastRenderedAt = Date()
+            trimRenderedBufferIfNeeded()
+        }
+    }
+
+    private func shouldSkipMessage(_ message: ChatMessage, at now: Date) -> Bool {
+        // Intentionally disabled at user request.
+        // Keep this implementation commented for future experiments.
+        _ = message
+        _ = now
+        return false
+
+        /*
+        if readabilityConfig.collapseRepeatsEnabled,
+           isRepeat(message, at: now) {
+            return true
+        }
+
+        guard readabilityConfig.smartFilteringEnabled else {
+            return false
+        }
+
+        guard !isPriority(message) else {
+            return false
+        }
+
+        let load = currentLoadLevel
+
+        switch load {
+        case .calm:
+            return false
+        case .busy:
+            if pendingMessages.count > Int(Double(readabilityConfig.mode.pendingLimit) * 0.55) {
+                samplingCounter += 1
+                return samplingCounter % readabilityConfig.mode.busySampleModulo == 0
+            }
+            return false
+        case .storm:
+            samplingCounter += 1
+            return samplingCounter % readabilityConfig.mode.stormSampleModulo != 0
+        }
+        */
+    }
+
+    private func isRepeat(_ message: ChatMessage, at now: Date) -> Bool {
+        let key = normalizedRepeatKey(for: message)
+        guard !key.isEmpty else { return false }
+
+        if let lastSeen = repeatTracker[key], now.timeIntervalSince(lastSeen) <= repeatWindowSeconds {
+            repeatTracker[key] = now
+            pruneRepeatTracker(now: now)
+            return true
+        }
+
+        repeatTracker[key] = now
+        pruneRepeatTracker(now: now)
+        return false
+    }
+
+    private func normalizedRepeatKey(for message: ChatMessage) -> String {
+        message.text
+            .lowercased()
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isPriority(_ message: ChatMessage) -> Bool {
+        if message.isAction {
+            return true
+        }
+
+        if message.badgeKeys.contains(where: { badge in
+            badge.hasPrefix("broadcaster/")
+                || badge.hasPrefix("moderator/")
+                || badge.hasPrefix("staff/")
+                || badge.hasPrefix("admin/")
+                || badge.hasPrefix("global_mod/")
+        }) {
+            return true
+        }
+
+        if let channel,
+           message.text.localizedCaseInsensitiveContains("@\(channel)") {
+            return true
+        }
+
+        return false
+    }
+
+    private func trackIngress(now: Date) {
+        ingressTimestamps.append(now)
+        let cutoff = now.addingTimeInterval(-rateWindowSeconds)
+        while let first = ingressTimestamps.first, first < cutoff {
+            ingressTimestamps.removeFirst()
+        }
+    }
+
+    private enum LoadLevel {
+        case calm
+        case busy
+        case storm
+    }
+
+    private var currentLoadLevel: LoadLevel {
+        let rate = Double(ingressTimestamps.count) / rateWindowSeconds
+        if rate >= readabilityConfig.mode.stormThresholdPerSecond {
+            return .storm
+        }
+        if rate >= readabilityConfig.mode.busyThresholdPerSecond {
+            return .busy
+        }
+        return .calm
+    }
+
+    private func trimPendingBufferIfNeeded() {
+        let limit = readabilityConfig.mode.pendingLimit
+        guard pendingMessages.count > limit else { return }
+        pendingMessages.removeFirst(pendingMessages.count - limit)
+    }
+
+    private func trimRenderedBufferIfNeeded() {
+        let limit = readabilityConfig.mode.historyLimit
+        guard messages.count > limit else { return }
+        messages.removeFirst(messages.count - limit)
+    }
+
+    private func pruneRepeatTracker(now: Date) {
+        let cutoff = now.addingTimeInterval(-repeatWindowSeconds)
+        repeatTracker = repeatTracker.filter { _, timestamp in
+            timestamp >= cutoff
         }
     }
 }

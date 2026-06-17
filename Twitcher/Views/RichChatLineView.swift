@@ -6,6 +6,7 @@ struct RichChatLineView: View {
     let nameColor: Color
     let globalEmoteURLs: [String: URL]
     let badgeURLs: [String: URL]
+    var readabilityMode: ChatReadabilityMode = .balanced
 
     private enum Segment: Hashable {
         case text(String)
@@ -20,8 +21,48 @@ struct RichChatLineView: View {
         message.badgeKeys.compactMap { badgeURLs[$0] }
     }
 
+    private var nameFontSize: CGFloat {
+        switch readabilityMode {
+        case .comfortable: return 28
+        case .balanced: return 26
+        case .compact: return 22
+        }
+    }
+
+    private var bodyFontSize: CGFloat {
+        switch readabilityMode {
+        case .comfortable: return 28
+        case .balanced: return 26
+        case .compact: return 22
+        }
+    }
+
+    private var badgeSize: CGFloat {
+        switch readabilityMode {
+        case .comfortable: return 24
+        case .balanced: return 22
+        case .compact: return 18
+        }
+    }
+
+    private var rowSpacing: CGFloat {
+        switch readabilityMode {
+        case .comfortable: return 6
+        case .balanced: return 4
+        case .compact: return 2
+        }
+    }
+
+    private var emoteHeight: CGFloat {
+        switch readabilityMode {
+        case .comfortable: return 36
+        case .balanced: return 34
+        case .compact: return 28
+        }
+    }
+
     var body: some View {
-        ChatFlowLayout(itemSpacing: 0, rowSpacing: 4) {
+        ChatFlowLayout(itemSpacing: 0, rowSpacing: rowSpacing) {
             ForEach(Array(resolvedBadgeURLs.enumerated()), id: \.offset) { _, badgeURL in
                 badgeView(url: badgeURL)
                     .padding(.top, 4)
@@ -29,7 +70,7 @@ struct RichChatLineView: View {
             }
 
             Text(message.isAction ? "\(message.username) " : "\(message.username): ")
-                .font(.system(size: 26, weight: .bold))
+                .font(.system(size: nameFontSize, weight: .bold))
                 .foregroundStyle(nameColor)
 
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
@@ -46,16 +87,16 @@ struct RichChatLineView: View {
                 image
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 22, height: 22)
+                    .frame(width: badgeSize, height: badgeSize)
             case .empty:
-                Color.clear.frame(width: 22, height: 22)
+                Color.clear.frame(width: badgeSize, height: badgeSize)
             case .failure:
-                Color.clear.frame(width: 22, height: 22)
+                Color.clear.frame(width: badgeSize, height: badgeSize)
             @unknown default:
-                Color.clear.frame(width: 22, height: 22)
+                Color.clear.frame(width: badgeSize, height: badgeSize)
             }
         }
-        .frame(width: 22, height: 22)
+        .frame(width: badgeSize, height: badgeSize)
     }
 
     @ViewBuilder
@@ -63,10 +104,10 @@ struct RichChatLineView: View {
         switch segment {
         case .text(let text):
             Text(text)
-                .font(.system(size: 26))
+                .font(.system(size: bodyFontSize))
                 .foregroundStyle(bodyColor)
         case .emote(let name, let url):
-            EmoteView(name: name, url: url, fallbackColor: bodyColor)
+            EmoteView(name: name, url: url, fallbackColor: bodyColor, fallbackFontSize: bodyFontSize, emoteHeight: emoteHeight)
         }
     }
 
@@ -119,11 +160,11 @@ struct RichChatLineView: View {
 }
 
 private struct EmoteView: View {
-    private static let emoteHeight: CGFloat = 34
-
     let name: String
     let url: URL
     let fallbackColor: Color
+    let fallbackFontSize: CGFloat
+    let emoteHeight: CGFloat
 
     @State private var loadFailed = false
 
@@ -131,7 +172,7 @@ private struct EmoteView: View {
         Group {
             if loadFailed {
                 Text(name)
-                    .font(.system(size: 26))
+                    .font(.system(size: fallbackFontSize))
                     .foregroundStyle(fallbackColor)
             } else {
                 AnimatedImage(url: url)
@@ -140,7 +181,7 @@ private struct EmoteView: View {
                     }
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(height: Self.emoteHeight)
+                    .frame(height: emoteHeight)
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
