@@ -109,6 +109,13 @@ enum ChatLayoutMode: String, CaseIterable {
   }
 }
 
+/// Carries the info from a Twitch raid USERNOTICE.
+struct RaidEvent {
+  let login: String
+  let displayName: String
+  let viewerCount: Int
+}
+
 /// Reads a Twitch channel's chat anonymously over IRC-via-WebSocket.
 ///
 /// No login or token required: we connect as a `justinfan` guest, request the
@@ -124,6 +131,8 @@ final class ChatService {
   private(set) var badgeURLs: [String: URL] = [:]
   private(set) var condensedMessagesCount = 0
   private(set) var youtubeStatusMessage: String?
+  /// Set when a raid USERNOTICE arrives. Cleared by the consumer after handling.
+  var pendingRaid: RaidEvent?
 
   private let endpoint = URL(string: "wss://irc-ws.chat.twitch.tv:443")!
 
@@ -229,18 +238,34 @@ final class ChatService {
   }
 
   private func receiveLoop() async {
-    guard let socket else { return }
     while !Task.isCancelled {
+      guard let currentSocket = socket else { break }
       do {
-        let frame = try await socket.receive()
+        let frame = try await currentSocket.receive()
         switch frame {
         case .string(let text): handle(text)
         case .data(let data): handle(String(decoding: data, as: UTF8.self))
         @unknown default: break
         }
       } catch {
+        guard !Task.isCancelled else { break }
         isConnected = false
-        break
+
+        // Reconnect after a brief pause, preserving the message buffer.
+        guard let channelToRejoin = channel else { break }
+        try? await Task.sleep(for: .seconds(3))
+        guard !Task.isCancelled, channel == channelToRejoin else { break }
+
+        socket?.cancel(with: .goingAway, reason: nil)
+        let newTask = URLSession(configuration: .default).webSocketTask(with: endpoint)
+        socket = newTask
+        hasSentJoin = false
+        hasCapAck = false
+        newTask.resume()
+        send("PASS SCHMOOPIIE")
+        send("NICK justinfan\(Int.random(in: 10_000..<99_999))")
+        send("CAP REQ :twitch.tv/tags twitch.tv/commands")
+        // Loop continues — next iteration receives on the new socket.
       }
     }
   }
@@ -262,6 +287,10 @@ final class ChatService {
         isConnected = true
         continue
       }
+      if let raid = parseRaidEvent(from: piece) {
+        pendingRaid = raid
+        continue
+      }
       if let message = ChatMessage(ircLine: piece) {
         parsedMessages.append(message)
       }
@@ -269,6 +298,33 @@ final class ChatService {
 
     guard !parsedMessages.isEmpty else { return }
     enqueue(parsedMessages)
+  }
+
+  /// Parse a Twitch USERNOTICE line for `msg-id=raid` and return a `RaidEvent`.
+  private func parseRaidEvent(from line: String) -> RaidEvent? {
+    // Line format:
+    //   @tags :tmi.twitch.tv USERNOTICE #channel [:message]
+    guard line.contains(" USERNOTICE ") else { return nil }
+
+    // Extract tags section.
+    var tags: [String: String] = [:]
+    if line.first == "@", let spaceIdx = line.firstIndex(of: " ") {
+      let tagString = line[line.index(after: line.startIndex)..<spaceIdx]
+      for pair in tagString.split(separator: ";") {
+        let kv = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+        if kv.count == 2 { tags[String(kv[0])] = String(kv[1]) }
+        else if kv.count == 1 { tags[String(kv[0])] = "" }
+      }
+    }
+
+    guard tags["msg-id"] == "raid" else { return nil }
+
+    let login = tags["msg-param-login"] ?? ""
+    let displayName = tags["msg-param-displayName"] ?? login
+    let viewerCount = Int(tags["msg-param-viewerCount"] ?? "0") ?? 0
+    guard !login.isEmpty else { return nil }
+
+    return RaidEvent(login: login, displayName: displayName, viewerCount: viewerCount)
   }
 
   private func restartYouTubeLoopIfNeeded() {
