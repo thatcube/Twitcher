@@ -1028,10 +1028,10 @@ struct PlayerView: View {
     .padding(.vertical, 12)
     .background(
       chatLayoutMode == .glass
-        ? AnyShapeStyle(.clear)
+        ? AnyShapeStyle(Color.black.opacity(0.22))
         : (chatLayoutMode == .overlay
-            ? AnyShapeStyle(Color(white: 0.13).opacity(0.92))
-            : AnyShapeStyle(Color(white: 0.07).opacity(0.98)))
+            ? AnyShapeStyle(Color(white: 0.13).opacity(0.90))
+            : AnyShapeStyle(Color(white: 0.07).opacity(0.96)))
     )
   }
 
