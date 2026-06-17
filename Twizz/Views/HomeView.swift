@@ -18,6 +18,7 @@ struct HomeView: View {
   @State private var follows = FollowedChannelsService()
   @State private var selectedChannel: FollowedChannel?
   @State private var firstFocusRequested = false
+  @State private var showAccount = false
 
   @FocusState private var focusedChannelID: String?
 
@@ -68,6 +69,14 @@ struct HomeView: View {
     .fullScreenCover(item: $selectedChannel) { channel in
       PlayerView(channel: channel.login)
     }
+    .fullScreenCover(isPresented: $showAccount) {
+      SignInView(auth: auth) {
+        Task {
+          await follows.refresh(using: auth)
+          requestFocusIfPossible(force: true)
+        }
+      }
+    }
   }
 
   private var topTabs: some View {
@@ -89,7 +98,21 @@ struct HomeView: View {
       }
 
       Spacer()
+
+      profileButton
     }
+  }
+
+  private var profileButton: some View {
+    Button {
+      showAccount = true
+    } label: {
+      Image(systemName: auth.isAuthenticated ? "person.crop.circle.fill" : "person.crop.circle")
+        .font(.title2)
+        .padding(12)
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(auth.isAuthenticated ? "Account" : "Sign in")
   }
 
   private var homeTab: some View {
@@ -184,66 +207,23 @@ struct HomeView: View {
     )
   }
 
+  @ViewBuilder
   private var authBanner: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if auth.isAuthenticated {
-        HStack {
-          Text("Signed in as \(auth.userDisplayName ?? auth.userLogin ?? "Twitch user")")
-            .font(.headline)
-          Spacer()
-          Button("Sign Out") {
-            auth.signOut()
-            Task {
-              await follows.refresh(using: auth)
-              requestFocusIfPossible(force: true)
-            }
-          }
-        }
-      } else {
-        HStack(spacing: 14) {
-          Button(auth.isAuthenticating ? "Authenticating..." : "Sign In With Twitch") {
-            Task {
-              await auth.beginDeviceCodeSignIn()
-              await follows.refresh(using: auth)
-              requestFocusIfPossible(force: true)
-            }
-          }
-          .disabled(auth.isAuthenticating)
-
-          if auth.isAuthenticating {
-            Button("Cancel") {
-              auth.cancelSignIn()
-            }
-          }
-        }
-
-        if let code = auth.activationCode, let verification = auth.verificationURI {
-          Text("Go to \(verification) and enter code \(code)")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-        }
-
-        if let message = auth.statusMessage {
-          Text(message)
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-        }
-
-        if let errorMessage = auth.errorMessage {
-          Text(errorMessage)
-            .font(.footnote)
-            .foregroundStyle(.orange)
+    if !auth.isAuthenticated {
+      HStack(spacing: 14) {
+        Button("Sign In With Twitch") {
+          showAccount = true
         }
 
         if follows.isUsingDemoData {
-          Text("Showing trending channels until you sign in with Twitch.")
-            .font(.caption)
+          Text("Showing trending channels until you sign in.")
+            .font(.footnote)
             .foregroundStyle(.secondary)
         }
       }
+      .padding(16)
+      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
-    .padding(16)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
   }
 
   private func requestFocusIfPossible(force: Bool) {
