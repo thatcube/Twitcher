@@ -90,6 +90,7 @@ struct PlayerView: View {
   @State private var isRecoveringPlayback = false
   @State private var consecutiveLoadFailures = 0
   @State private var lastControlFocus: Focusable = .quality
+  @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
 
   private let controlsAutoHideSeconds: Double = 10
   private let targetLiveEdgeSeconds: Double = 3.5
@@ -262,6 +263,20 @@ struct PlayerView: View {
       }
     }
     .onChange(of: focus) { _, newFocus in
+      if showChatSettings {
+        guard let newFocus else {
+          focus = lastChatSettingsFocus
+          return
+        }
+
+        if isChatSettingsFocus(newFocus) {
+          lastChatSettingsFocus = newFocus
+        } else {
+          focus = lastChatSettingsFocus
+        }
+        return
+      }
+
       // Keep control navigation deterministic: if tvOS drops focus to nil
       // while controls are visible, immediately restore last valid control.
       guard showControls, !showQualityPicker, !showCaptionsPicker else {
@@ -555,6 +570,22 @@ struct PlayerView: View {
     }
   }
 
+  private func isChatSettingsFocus(_ focus: Focusable) -> Bool {
+    switch focus {
+    case .chatSettingsButton,
+      .chatTextSizeOption,
+      .chatLineHeightOption,
+      .chatLineSpacingOption,
+      .chatWidthOption,
+      .chatLayoutOption,
+      .youtubeMergeToggle,
+      .youtubeMergeURL:
+      return true
+    default:
+      return false
+    }
+  }
+
   private var chatPane: some View {
     let isGlass = chatLayoutMode == .glass
     return VStack(spacing: 0) {
@@ -599,9 +630,13 @@ struct PlayerView: View {
           .frame(width: 30, height: 30)
       }
       .TwizzControlButtonStyle()
+      .focusEffectDisabled()
       .focused($focus, equals: .chatSettingsButton)
       .onMoveCommand { direction in
-        if direction == .down, !showChatSettings {
+        if direction == .down, showChatSettings {
+          let selected = ChatTextSizeOption.allCases.firstIndex(of: chatTextSize) ?? 0
+          focus = .chatTextSizeOption(selected)
+        } else if direction == .down {
           focus = .chatInput
         }
       }
@@ -814,6 +849,7 @@ struct PlayerView: View {
       )
     }
     .buttonStyle(.plain)
+    .focusEffectDisabled()
     .focused($focus, equals: focusTag)
   }
 
@@ -821,8 +857,11 @@ struct PlayerView: View {
     showChatSettings.toggle()
     if showChatSettings {
       let selected = ChatTextSizeOption.allCases.firstIndex(of: chatTextSize) ?? 0
-      focus = .chatTextSizeOption(selected)
+      let target: Focusable = .chatTextSizeOption(selected)
+      lastChatSettingsFocus = target
+      focus = target
     } else {
+      lastChatSettingsFocus = .chatSettingsButton
       focus = .chatSettingsButton
     }
   }
