@@ -3,362 +3,360 @@ import SwiftUI
 // MARK: - BrowseView
 
 struct BrowseView: View {
-    let auth: TwitchAuthSession
-    @Binding var selectedChannel: FollowedChannel?
-    @Binding var pendingCategory: TwitchCategory?
+  let auth: TwitchAuthSession
+  @Binding var selectedChannel: FollowedChannel?
+  @Binding var pendingCategory: TwitchCategory?
 
-    @State private var service = BrowseService()
-    @State private var path: [TwitchCategory] = []
+  @State private var service = BrowseService()
+  @State private var path: [TwitchCategory] = []
 
-    private func open(_ category: TwitchCategory) {
-        if path.last != category {
-            withAnimation(.easeInOut(duration: 0.35)) {
-                path.append(category)
-            }
+  private func open(_ category: TwitchCategory) {
+    if path.last != category {
+      withAnimation(.easeInOut(duration: 0.35)) {
+        path.append(category)
+      }
+    }
+  }
+
+  var body: some View {
+    NavigationStack(path: $path) {
+      BrowseCategoriesView(
+        service: service,
+        onSelectCategory: { category in
+          open(category)
         }
-    }
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            BrowseCategoriesView(
-                service: service,
-                onSelectCategory: { category in
-                    open(category)
-                }
-            )
-            .task {
-                if service.categories.isEmpty {
-                    await service.loadCategories()
-                }
-            }
-            .navigationDestination(for: TwitchCategory.self) { category in
-                BrowseStreamsView(
-                    category: category,
-                    service: service,
-                    selectedChannel: $selectedChannel
-                )
-                .task(id: category.id) {
-                    await service.loadStreams(for: category)
-                }
-            }
+      )
+      .task {
+        if service.categories.isEmpty {
+          await service.loadCategories()
         }
-        .onAppear { consumePendingCategoryIfNeeded() }
-        .onChange(of: pendingCategory) { _, _ in consumePendingCategoryIfNeeded() }
+      }
+      .navigationDestination(for: TwitchCategory.self) { category in
+        BrowseStreamsView(
+          category: category,
+          service: service,
+          selectedChannel: $selectedChannel
+        )
+        .task(id: category.id) {
+          await service.loadStreams(for: category)
+        }
+      }
     }
+    .onAppear { consumePendingCategoryIfNeeded() }
+    .onChange(of: pendingCategory) { _, _ in consumePendingCategoryIfNeeded() }
+  }
 
-    private func consumePendingCategoryIfNeeded() {
-        guard let category = pendingCategory else { return }
-        pendingCategory = nil
-        open(category)
-    }
+  private func consumePendingCategoryIfNeeded() {
+    guard let category = pendingCategory else { return }
+    pendingCategory = nil
+    open(category)
+  }
 }
 
 // MARK: - Categories Grid
 
 private struct BrowseCategoriesView: View {
-    let service: BrowseService
-    let onSelectCategory: (TwitchCategory) -> Void
+  let service: BrowseService
+  let onSelectCategory: (TwitchCategory) -> Void
 
-    @FocusState private var focusedID: String?
+  @FocusState private var focusedID: String?
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 24)
-    ]
+  private let columns = [
+    GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 24)
+  ]
 
-    var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack {
-                    Text("Browse")
-                        .font(.title.weight(.bold))
+  var body: some View {
+    ScrollView(.vertical, showsIndicators: false) {
+      VStack(alignment: .leading, spacing: 24) {
+        HStack {
+          Text("Browse")
+            .font(.title.weight(.bold))
 
-                    if service.isLoadingCategories {
-                        ProgressView().scaleEffect(0.85)
-                    }
+          if service.isLoadingCategories {
+            ProgressView().scaleEffect(0.85)
+          }
 
-                    Spacer()
+          Spacer()
 
-                    Button("Refresh") {
-                        Task { await service.loadCategories() }
-                    }
-                }
-
-                if let err = service.categoryErrorMessage {
-                    Text(err)
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                }
-
-                LazyVGrid(columns: columns, spacing: 24) {
-                    ForEach(service.categories) { category in
-                        let isFocused = focusedID == category.id
-                        CategoryCard(
-                            category: category,
-                            isFocused: isFocused
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 14))
-                        .focusable(true)
-                        .focused($focusedID, equals: category.id)
-                        .focusEffectDisabled()
-                        .onTapGesture {
-                            onSelectCategory(category)
-                        }
-                        .scaleEffect(isFocused ? 1.07 : 1)
-                        .animation(.easeOut(duration: 0.14), value: isFocused)
-                        .zIndex(isFocused ? 2 : 0)
-                    }
-                }
-                .padding(.vertical, 8)
-                .focusSection()
-            }
-            .padding(.bottom, 12)
+          Button("Refresh") {
+            Task { await service.loadCategories() }
+          }
         }
-        .scrollClipDisabled()
-        .padding(.top, 140)
-        .padding(.horizontal, AppLayout.horizontalPadding)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+        if let err = service.categoryErrorMessage {
+          Text(err)
+            .font(.footnote)
+            .foregroundStyle(.orange)
+        }
+
+        LazyVGrid(columns: columns, spacing: 24) {
+          ForEach(service.categories) { category in
+            let isFocused = focusedID == category.id
+            CategoryCard(
+              category: category,
+              isFocused: isFocused
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .focusable(true)
+            .focused($focusedID, equals: category.id)
+            .focusEffectDisabled()
+            .onTapGesture {
+              onSelectCategory(category)
+            }
+            .scaleEffect(isFocused ? 1.07 : 1)
+            .animation(.easeOut(duration: 0.14), value: isFocused)
+            .zIndex(isFocused ? 2 : 0)
+          }
+        }
+        .padding(.vertical, 8)
+        .focusSection()
+      }
+      .padding(.bottom, 12)
     }
+
+  }
 }
 
 // MARK: - Streams for a Category
 
 private struct BrowseStreamsView: View {
-    let category: TwitchCategory
-    let service: BrowseService
-    @Binding var selectedChannel: FollowedChannel?
+  let category: TwitchCategory
+  let service: BrowseService
+  @Binding var selectedChannel: FollowedChannel?
 
-    @Environment(\.dismiss) private var dismiss
-    @FocusState private var focusedStreamID: String?
+  @Environment(\.dismiss) private var dismiss
+  @FocusState private var focusedStreamID: String?
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
-    private let gridSpacing: CGFloat = 20
-    private let gridBottomInset: CGFloat = 12
+  private let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
+  private let gridSpacing: CGFloat = 20
+  private let gridBottomInset: CGFloat = 12
 
-    var body: some View {
-        ZStack(alignment: .top) {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Header (scrolls with content)
-                    HStack(spacing: 20) {
-                        Button(action: { dismiss() }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "chevron.left")
-                                Text("Categories")
-                            }
-                            .font(.callout.weight(.medium))
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Color.primary.opacity(0.1))
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        if let url = category.boxArtURL {
-                            AsyncImage(url: url) { img in
-                                img.resizable().scaledToFill()
-                            } placeholder: {
-                                Color.primary.opacity(0.08)
-                            }
-                            .frame(width: 40, height: 53)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(category.name)
-                                .font(.title.weight(.bold))
-                            if let viewers = category.viewerCount {
-                                Text("\(viewers) watching")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        if service.isLoadingStreams && service.categoryStreams.isEmpty {
-                            ProgressView().scaleEffect(0.85)
-                        }
-
-                        Spacer()
-                    }
-                    .focusSection()
-
-                    if let err = service.streamsErrorMessage {
-                        Text(err)
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                    }
-
-                    if !service.isLoadingStreams && service.categoryStreams.isEmpty && service.streamsErrorMessage == nil {
-                        Text("No live streams found for \(category.name) right now.")
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 8)
-                    } else {
-                        LazyVGrid(columns: columns, spacing: gridSpacing) {
-                            ForEach(service.categoryStreams) { channel in
-                                let isFocused = focusedStreamID == channel.id
-                                BrowseChannelCard(
-                                    channel: channel,
-                                    isFocused: isFocused
-                                )
-                                .contentShape(RoundedRectangle(cornerRadius: 16))
-                                .focusable(true)
-                                .focused($focusedStreamID, equals: channel.id)
-                                .focusEffectDisabled()
-                                .onTapGesture {
-                                    selectedChannel = channel
-                                }
-                                .scaleEffect(isFocused ? 1.06 : 1)
-                                .animation(.easeOut(duration: 0.14), value: isFocused)
-                                .zIndex(isFocused ? 2 : 0)
-                            }
-                        }
-                        .focusSection()
-                    }
-                }
-                .padding(.horizontal, AppLayout.horizontalPadding)
-                .padding(.top, 8)
-                .padding(.bottom, gridBottomInset)
+  var body: some View {
+    ZStack(alignment: .top) {
+      ScrollView(.vertical, showsIndicators: false) {
+        VStack(alignment: .leading, spacing: 20) {
+          // Header (scrolls with content)
+          HStack(spacing: 20) {
+            Button(action: { dismiss() }) {
+              HStack(spacing: 8) {
+                Image(systemName: "chevron.left")
+                Text("Categories")
+              }
+              .font(.callout.weight(.medium))
+              .padding(.horizontal, 18)
+              .padding(.vertical, 8)
+              .background(
+                RoundedRectangle(cornerRadius: 10)
+                  .fill(Color.primary.opacity(0.1))
+              )
             }
-            .scrollClipDisabled()
+            .buttonStyle(.plain)
+
+            if let url = category.boxArtURL {
+              AsyncImage(url: url) { img in
+                img.resizable().scaledToFill()
+              } placeholder: {
+                Color.primary.opacity(0.08)
+              }
+              .frame(width: 40, height: 53)
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+              Text(category.name)
+                .font(.title.weight(.bold))
+              if let viewers = category.viewerCount {
+                Text("\(viewers) watching")
+                  .font(.footnote)
+                  .foregroundStyle(.secondary)
+              }
+            }
+
+            if service.isLoadingStreams && service.categoryStreams.isEmpty {
+              ProgressView().scaleEffect(0.85)
+            }
+
+            Spacer()
+          }
+          .focusSection()
+
+          if let err = service.streamsErrorMessage {
+            Text(err)
+              .font(.footnote)
+              .foregroundStyle(.orange)
+          }
+
+          if !service.isLoadingStreams && service.categoryStreams.isEmpty
+            && service.streamsErrorMessage == nil
+          {
+            Text("No live streams found for \(category.name) right now.")
+              .foregroundStyle(.secondary)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .padding(.top, 8)
+          } else {
+            LazyVGrid(columns: columns, spacing: gridSpacing) {
+              ForEach(service.categoryStreams) { channel in
+                let isFocused = focusedStreamID == channel.id
+                BrowseChannelCard(
+                  channel: channel,
+                  isFocused: isFocused
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 16))
+                .focusable(true)
+                .focused($focusedStreamID, equals: channel.id)
+                .focusEffectDisabled()
+                .onTapGesture {
+                  selectedChannel = channel
+                }
+                .scaleEffect(isFocused ? 1.06 : 1)
+                .animation(.easeOut(duration: 0.14), value: isFocused)
+                .zIndex(isFocused ? 2 : 0)
+              }
+            }
+            .focusSection()
+          }
         }
+        .padding(.horizontal, AppLayout.horizontalPadding)
         .padding(.top, 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .navigationBarHidden(true)
-        .toolbar(.hidden, for: .tabBar)
-        .onChange(of: service.categoryStreams) { _, streams in
-            if focusedStreamID == nil, let first = streams.first {
-                Task {
-                    try? await Task.sleep(for: .milliseconds(150))
-                    await MainActor.run { focusedStreamID = first.id }
-                }
-            }
-        }
+        .padding(.bottom, gridBottomInset)
+      }
     }
+    .padding(.top, 8)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .navigationBarHidden(true)
+    .toolbar(.hidden, for: .tabBar)
+    .onChange(of: service.categoryStreams) { _, streams in
+      if focusedStreamID == nil, let first = streams.first {
+        Task {
+          try? await Task.sleep(for: .milliseconds(150))
+          await MainActor.run { focusedStreamID = first.id }
+        }
+      }
+    }
+  }
 }
 
 // MARK: - Category Card
 
 private struct CategoryCard: View {
-    let category: TwitchCategory
-    let isFocused: Bool
+  let category: TwitchCategory
+  let isFocused: Bool
 
-    @Environment(\.themePalette) private var palette
+  @Environment(\.themePalette) private var palette
 
-    private let cornerRadius: CGFloat = 14
-    private let artRatio: CGFloat = 285.0 / 380.0
+  private let cornerRadius: CGFloat = 14
+  private let artRatio: CGFloat = 285.0 / 380.0
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            AsyncImage(url: category.boxArtURL) { img in
-                img.resizable().scaledToFill()
-            } placeholder: {
-                Color.primary.opacity(0.08)
-            }
-            .aspectRatio(artRatio, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius - 2))
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      AsyncImage(url: category.boxArtURL) { img in
+        img.resizable().scaledToFill()
+      } placeholder: {
+        Color.primary.opacity(0.08)
+      }
+      .aspectRatio(artRatio, contentMode: .fit)
+      .clipShape(RoundedRectangle(cornerRadius: cornerRadius - 2))
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(category.name)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
-                    .lineLimit(2, reservesSpace: true)
+      VStack(alignment: .leading, spacing: 4) {
+        Text(category.name)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
+          .lineLimit(2, reservesSpace: true)
 
-                if let viewers = category.viewerCount {
-                    Text("\(viewers) watching")
-                        .font(.caption2)
-                        .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
-                } else {
-                    Text(" ")
-                        .font(.caption2)
-                        .hidden()
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 10)
+        if let viewers = category.viewerCount {
+          Text("\(viewers) watching")
+            .font(.caption2)
+            .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
+        } else {
+          Text(" ")
+            .font(.caption2)
+            .hidden()
         }
-        .background {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
-        }
+      }
+      .padding(.horizontal, 8)
+      .padding(.bottom, 10)
     }
+    .background {
+      RoundedRectangle(cornerRadius: cornerRadius)
+        .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
+    }
+  }
 }
 
 // MARK: - Browse Channel Card
 
 private struct BrowseChannelCard: View {
-    let channel: FollowedChannel
-    let isFocused: Bool
+  let channel: FollowedChannel
+  let isFocused: Bool
 
-    @Environment(\.themePalette) private var palette
+  @Environment(\.themePalette) private var palette
 
-    private let cardCornerRadius: CGFloat = 16
-    private let mediaCornerRadius: CGFloat = 12
-    private let focusInset: CGFloat = 14
+  private let cardCornerRadius: CGFloat = 16
+  private let mediaCornerRadius: CGFloat = 12
+  private let focusInset: CGFloat = 14
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack(alignment: .bottomLeading) {
-                Color.primary.opacity(0.08)
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      ZStack(alignment: .bottomLeading) {
+        Color.primary.opacity(0.08)
 
-                AsyncImage(url: channel.thumbnailURL) { img in
-                    img.resizable().scaledToFill()
-                } placeholder: {
-                    Color.clear
-                }
-
-                LinearGradient(
-                    colors: [Color.clear, Color.black.opacity(0.82)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 8, height: 8)
-                    if let viewerCount = channel.viewerCount {
-                        Text("\(viewerCount) watching")
-                            .font(.caption2)
-                            .foregroundStyle(Color.white.opacity(0.78))
-                    }
-                }
-                .padding(12)
-            }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(16 / 9, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
-
-            HStack(alignment: .top, spacing: 10) {
-                AsyncImage(url: channel.profileImageURL) { img in
-                    img.resizable().scaledToFill()
-                } placeholder: {
-                    Circle()
-                        .fill(Color.primary.opacity(0.14))
-                }
-                .frame(width: 68, height: 68)
-                .clipShape(Circle())
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(channel.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
-                        .lineLimit(1)
-
-                    Text(channel.title.isEmpty ? "No title" : channel.title)
-                        .font(.footnote)
-                        .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
-                        .lineLimit(2, reservesSpace: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+        AsyncImage(url: channel.thumbnailURL) { img in
+          img.resizable().scaledToFill()
+        } placeholder: {
+          Color.clear
         }
-        .padding(focusInset)
-        .background {
-            RoundedRectangle(cornerRadius: cardCornerRadius)
-                .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
+
+        LinearGradient(
+          colors: [Color.clear, Color.black.opacity(0.82)],
+          startPoint: .top,
+          endPoint: .bottom
+        )
+
+        HStack(spacing: 8) {
+          Circle()
+            .fill(Color.red)
+            .frame(width: 8, height: 8)
+          if let viewerCount = channel.viewerCount {
+            Text("\(viewerCount) watching")
+              .font(.caption2)
+              .foregroundStyle(Color.white.opacity(0.78))
+          }
         }
+        .padding(12)
+      }
+      .frame(maxWidth: .infinity)
+      .aspectRatio(16 / 9, contentMode: .fit)
+      .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
+
+      HStack(alignment: .top, spacing: 10) {
+        AsyncImage(url: channel.profileImageURL) { img in
+          img.resizable().scaledToFill()
+        } placeholder: {
+          Circle()
+            .fill(Color.primary.opacity(0.14))
+        }
+        .frame(width: 68, height: 68)
+        .clipShape(Circle())
+
+        VStack(alignment: .leading, spacing: 4) {
+          Text(channel.displayName)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
+            .lineLimit(1)
+
+          Text(channel.title.isEmpty ? "No title" : channel.title)
+            .font(.footnote)
+            .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
+            .lineLimit(2, reservesSpace: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
     }
+    .padding(focusInset)
+    .background {
+      RoundedRectangle(cornerRadius: cardCornerRadius)
+        .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
+    }
+  }
 }

@@ -53,6 +53,7 @@ struct HomeView: View {
       tabContainer { homeTab }
         .tabItem { Text("Home") }
         .tag(TopTab.home)
+        .toolbar(.visible, for: .tabBar)
 
       tabContainer {
         BrowseView(
@@ -63,6 +64,7 @@ struct HomeView: View {
       }
       .tabItem { Text("Browse") }
       .tag(TopTab.browse)
+      .toolbar(.visible, for: .tabBar)
 
       SettingsView(
         themeManager: themeManager,
@@ -77,6 +79,7 @@ struct HomeView: View {
       )
       .tabItem { Text("Settings") }
       .tag(TopTab.settings)
+      .toolbar(.visible, for: .tabBar)
     }
     .background(
       LinearGradient(
@@ -163,8 +166,6 @@ struct HomeView: View {
         .padding(.top, 20)
         .padding(.bottom, 20)
       }
-      .scrollClipDisabled()
-      .padding(.top, 140)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
   }
