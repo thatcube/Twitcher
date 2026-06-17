@@ -129,6 +129,7 @@ struct HomeView: View {
       .environment(\.themePalette, resolvedPalette)
       .preferredColorScheme(themeManager.theme.preferredColorScheme)
     }
+    .toolbar(.visible, for: .tabBar)
   }
 
   @ViewBuilder

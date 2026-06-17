@@ -66,29 +66,29 @@ private struct BrowseCategoriesView: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack {
-                Text("Browse")
-                    .font(.title.weight(.bold))
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack {
+                    Text("Browse")
+                        .font(.title.weight(.bold))
 
-                if service.isLoadingCategories {
-                    ProgressView().scaleEffect(0.85)
+                    if service.isLoadingCategories {
+                        ProgressView().scaleEffect(0.85)
+                    }
+
+                    Spacer()
+
+                    Button("Refresh") {
+                        Task { await service.loadCategories() }
+                    }
                 }
 
-                Spacer()
-
-                Button("Refresh") {
-                    Task { await service.loadCategories() }
+                if let err = service.categoryErrorMessage {
+                    Text(err)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
                 }
-            }
 
-            if let err = service.categoryErrorMessage {
-                Text(err)
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-            }
-
-            ScrollView(.vertical, showsIndicators: false) {
                 LazyVGrid(columns: columns, spacing: 24) {
                     ForEach(service.categories) { category in
                         let isFocused = focusedID == category.id
@@ -109,12 +109,11 @@ private struct BrowseCategoriesView: View {
                     }
                 }
                 .padding(.vertical, 8)
+                .focusSection()
             }
-            .scrollClipDisabled()
-            .focusSection()
-
-            Spacer(minLength: 0)
+            .padding(.bottom, 12)
         }
+        .scrollClipDisabled()
         .padding(.horizontal, AppLayout.horizontalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
