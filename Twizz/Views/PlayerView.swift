@@ -771,12 +771,29 @@ struct PlayerView: View {
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
         ZStack {
+          RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(
+              focus == .chatInput
+                ? Color.white.opacity(0.94)
+                : Color.white.opacity(0.12)
+            )
+            .overlay(
+              RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(
+                  focus == .chatInput
+                    ? Color.white.opacity(1.0)
+                    : Color.white.opacity(0.22),
+                  lineWidth: 1
+                )
+            )
+
           ChatInputField(
             text: .constant(""),
             placeholder: "Sign in to send messages",
             isFocused: focus == .chatInput
           )
           .allowsHitTesting(false)
+          .padding(.horizontal, 20)
           // Keep the signed-out prompt visually aligned with the active input.
           .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
