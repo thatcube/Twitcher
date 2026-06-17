@@ -107,6 +107,16 @@ struct HomeView: View {
 
       profileButton
     }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 10)
+    .background {
+      RoundedRectangle(cornerRadius: 18, style: .continuous)
+        .fill(.ultraThinMaterial)
+        .overlay(
+          RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
   }
 
   private var profileButton: some View {
