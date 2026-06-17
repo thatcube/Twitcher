@@ -71,8 +71,10 @@ struct SignInView: View {
         .padding(.top, 8)
       }
     }
-    .padding(96)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .padding(.horizontal, 96)
+    .padding(.top, 168)
+    .padding(.bottom, 40)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
   }
 
   // MARK: - Option: scan QR
