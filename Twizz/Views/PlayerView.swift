@@ -768,13 +768,8 @@ struct PlayerView: View {
           .foregroundStyle(.white.opacity(0.84))
           .textCase(.uppercase)
 
-        Text("Merge YouTube live chat (no sign-in). This may break if YouTube changes internals.")
-          .font(.caption2)
-          .foregroundStyle(.white.opacity(0.66))
-          .fixedSize(horizontal: false, vertical: true)
-
         settingsPill(
-          title: experimentalYouTubeMergeEnabled ? "YouTube Merge On" : "YouTube Merge Off",
+          title: "Merge with YouTube Chat",
           isSelected: experimentalYouTubeMergeEnabled,
           focusTag: .youtubeMergeToggle
         ) {
@@ -783,7 +778,7 @@ struct PlayerView: View {
 
         ChatInputField(
           text: $experimentalYouTubeMergeChannelOrURL,
-          placeholder: "YouTube live URL or video ID",
+          placeholder: "YouTube handle/URL (defaults to @\(channel))",
           isFocused: focus == .youtubeMergeURL
         )
         .frame(height: 44)
@@ -1156,9 +1151,13 @@ struct PlayerView: View {
   }
 
   private func applyExperimentalYouTubeSettings() {
+    let manual = experimentalYouTubeMergeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    let defaultTarget = channel
+    let resolvedTarget = manual.isEmpty ? defaultTarget : manual
+
     chat.configureExperimentalYouTubeMerge(
       enabled: experimentalYouTubeMergeEnabled,
-      channelOrURL: experimentalYouTubeMergeChannelOrURL
+      channelOrURL: resolvedTarget
     )
   }
 

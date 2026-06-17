@@ -278,14 +278,15 @@ final class ChatService {
       return
     }
 
-    guard let videoID = Self.extractYouTubeVideoID(from: youtubeChannelOrURL) else {
-      youtubeStatusMessage = "YouTube merge enabled. Paste a YouTube live URL or video ID."
+    let target = youtubeChannelOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !target.isEmpty else {
+      youtubeStatusMessage = "Enter a YouTube handle, URL, or video ID."
       return
     }
 
-    youtubeStatusMessage = "Connecting YouTube chat…"
+    youtubeStatusMessage = "Resolving YouTube live stream…"
     youtubeReceiveTask = Task { [weak self] in
-      await self?.runYouTubeLoop(videoID: videoID)
+      await self?.runYouTubeLoop(target: target)
     }
   }
 
@@ -297,15 +298,34 @@ final class ChatService {
     }
   }
 
-  private func runYouTubeLoop(videoID: String) async {
+  private func runYouTubeLoop(target: String) async {
+    var videoID: String?
     var continuationToken: String?
     var apiKey: String?
     var clientVersion: String?
 
     while !Task.isCancelled {
       do {
+        if videoID == nil {
+          videoID = await resolveYouTubeVideoID(from: target)
+          guard let currentVideoID = videoID else {
+            youtubeStatusMessage = "No live YouTube stream found for \(target)."
+            try? await Task.sleep(for: .seconds(10))
+            continue
+          }
+          youtubeStatusMessage = "Connecting YouTube chat…"
+          continuationToken = nil
+          apiKey = nil
+          clientVersion = nil
+          _ = currentVideoID
+        }
+
         if continuationToken == nil || apiKey == nil || clientVersion == nil {
-          let bootstrap = try await fetchYouTubeBootstrap(videoID: videoID)
+          guard let currentVideoID = videoID else {
+            throw YouTubeScrapeError.bootstrapUnavailable
+          }
+
+          let bootstrap = try await fetchYouTubeBootstrap(videoID: currentVideoID)
           continuationToken = bootstrap.continuation
           apiKey = bootstrap.apiKey
           clientVersion = bootstrap.clientVersion
@@ -339,12 +359,61 @@ final class ChatService {
         youtubeStatusMessage = "YouTube chat unavailable right now (experimental)."
 
         // Re-bootstrap after failures because continuation tokens can expire.
+        videoID = nil
         continuationToken = nil
         apiKey = nil
         clientVersion = nil
         try? await Task.sleep(for: .seconds(4))
       }
     }
+  }
+
+  private func resolveYouTubeVideoID(from input: String) async -> String? {
+    if let direct = Self.extractYouTubeVideoID(from: input) {
+      return direct
+    }
+
+    guard let liveURL = Self.makeYouTubeLiveLookupURL(from: input) else {
+      return nil
+    }
+
+    var request = URLRequest(url: liveURL)
+    request.timeoutInterval = 20
+    request.setValue(youtubeUserAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+
+    do {
+      let (data, response) = try await URLSession.shared.data(for: request)
+      guard let http = response as? HTTPURLResponse,
+        (200...299).contains(http.statusCode)
+      else {
+        return nil
+      }
+
+      if let finalURL = http.url?.absoluteString,
+        let id = Self.extractYouTubeVideoID(from: finalURL)
+      {
+        return id
+      }
+
+      let html = String(decoding: data, as: UTF8.self)
+      if let canonical = Self.extractQuotedValue(after: "\"canonicalUrl\":\"", in: html) {
+        let decodedCanonical = Self.decodeEscapedJSONString(canonical)
+        if let id = Self.extractYouTubeVideoID(from: decodedCanonical) {
+          return id
+        }
+      }
+
+      if let id = Self.extractQuotedValue(after: "\"videoId\":\"", in: html)
+        .flatMap(Self.sanitizedYouTubeVideoID)
+      {
+        return id
+      }
+    } catch {
+      return nil
+    }
+
+    return nil
   }
 
   private func filterAndRememberYouTubeMessages(_ entries: [YouTubePollEntry]) -> [ChatMessage] {
@@ -665,6 +734,41 @@ final class ChatService {
       .replacingOccurrences(of: "\\/", with: "/")
   }
 
+  private static func makeYouTubeLiveLookupURL(from input: String) -> URL? {
+    let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if trimmed.hasPrefix("@") {
+      return URL(string: "https://www.youtube.com/\(trimmed)/live")
+    }
+
+    if !trimmed.contains("://") && !trimmed.contains("/") && !trimmed.contains("?") {
+      return URL(string: "https://www.youtube.com/@\(trimmed)/live")
+    }
+
+    let normalized = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+    guard let components = URLComponents(string: normalized),
+      let host = components.host?.lowercased(),
+      host.contains("youtube.com")
+    else {
+      return nil
+    }
+
+    let parts = components.path.split(separator: "/")
+    if let handle = parts.first(where: { $0.hasPrefix("@") }) {
+      return URL(string: "https://www.youtube.com/\(handle)/live")
+    }
+
+    if parts.count >= 2 {
+      let root = parts[0]
+      if root == "channel" || root == "c" || root == "user" {
+        return URL(string: "https://www.youtube.com/\(root)/\(parts[1])/live")
+      }
+    }
+
+    return nil
+  }
+
   private static func extractYouTubeVideoID(from input: String) -> String? {
     let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
@@ -714,7 +818,7 @@ final class ChatService {
 
   private static func sanitizedYouTubeVideoID(_ raw: String) -> String? {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard (8...16).contains(trimmed.count) else { return nil }
+    guard trimmed.count == 11 else { return nil }
 
     let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
     guard trimmed.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
