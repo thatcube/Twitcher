@@ -770,42 +770,21 @@ struct PlayerView: View {
         .frame(height: chatComposerRowHeight)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
-        ZStack {
-          RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(
-              focus == .chatInput
-                ? Color.white.opacity(0.94)
-                : Color.white.opacity(0.12)
-            )
-            .overlay(
-              RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(
-                  focus == .chatInput
-                    ? Color.white.opacity(1.0)
-                    : Color.white.opacity(0.22),
-                  lineWidth: 1
-                )
-            )
-
-          ChatInputField(
-            text: .constant(""),
-            placeholder: "Sign in to send messages",
-            isFocused: focus == .chatInput
-          )
-          .allowsHitTesting(false)
-          .padding(.horizontal, 20)
-          // Keep the signed-out prompt visually aligned with the active input.
-          .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
-          .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
-          .frame(maxWidth: .infinity)
-        }
-        .contentShape(Rectangle())
-        .focusable()
+        ChatInputField(
+          text: .constant(""),
+          placeholder: "Sign in to send messages",
+          isFocused: focus == .chatInput,
+          allowsEditing: false,
+          onActivate: {
+            showSignInSheet = true
+            scheduleHide()
+          }
+        )
+        // Keep the signed-out prompt visually aligned with the active input.
+        .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
+        .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
+        .frame(maxWidth: .infinity)
         .focused($focus, equals: .chatInput)
-        .onTapGesture {
-          showSignInSheet = true
-          scheduleHide()
-        }
         .onMoveCommand { direction in
           switch direction {
           case .left:
@@ -1573,6 +1552,8 @@ private struct ChatInputField: UIViewRepresentable {
   @Binding var text: String
   let placeholder: String
   let isFocused: Bool
+  var allowsEditing: Bool = true
+  var onActivate: (() -> Void)? = nil
 
   func makeUIView(context: Context) -> UITextField {
     let field = UITextField()
@@ -1602,6 +1583,9 @@ private struct ChatInputField: UIViewRepresentable {
       uiView.text = text
     }
 
+    context.coordinator.allowsEditing = allowsEditing
+    context.coordinator.onActivate = onActivate
+
     // In the focused tvOS state, the system draws a bright field background.
     // Match text and placeholder colors so content remains readable.
     let foreground: UIColor = isFocused ? .black : .white
@@ -1618,14 +1602,26 @@ private struct ChatInputField: UIViewRepresentable {
   }
 
   func makeCoordinator() -> Coordinator {
-    Coordinator(text: $text)
+    Coordinator(text: $text, allowsEditing: allowsEditing, onActivate: onActivate)
   }
 
   final class Coordinator: NSObject, UITextFieldDelegate {
     private let text: Binding<String>
+    var allowsEditing: Bool
+    var onActivate: (() -> Void)?
 
-    init(text: Binding<String>) {
+    init(text: Binding<String>, allowsEditing: Bool, onActivate: (() -> Void)?) {
       self.text = text
+      self.allowsEditing = allowsEditing
+      self.onActivate = onActivate
+    }
+
+    func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
+      guard allowsEditing else {
+        onActivate?()
+        return false
+      }
+      return true
     }
 
     @objc func editingChanged(_ field: UITextField) {
