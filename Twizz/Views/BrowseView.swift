@@ -125,63 +125,63 @@ private struct BrowseStreamsView: View {
     private let gridSpacing: CGFloat = 20
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            // Header
-            HStack(spacing: 20) {
-                Button(action: onBack) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.left")
-                        Text("Categories")
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 24) {
+                // Header
+                HStack(spacing: 20) {
+                    Button(action: onBack) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left")
+                            Text("Categories")
+                        }
+                        .font(.callout.weight(.medium))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.white.opacity(0.1))
+                        )
                     }
-                    .font(.callout.weight(.medium))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color.white.opacity(0.1))
-                    )
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(.plain)
 
-                if let url = category.boxArtURL {
-                    AsyncImage(url: url) { img in
-                        img.resizable().scaledToFill()
-                    } placeholder: {
-                        Color.white.opacity(0.08)
+                    if let url = category.boxArtURL {
+                        AsyncImage(url: url) { img in
+                            img.resizable().scaledToFill()
+                        } placeholder: {
+                            Color.white.opacity(0.08)
+                        }
+                        .frame(width: 40, height: 53)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
-                    .frame(width: 40, height: 53)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(category.name)
-                        .font(.title.weight(.bold))
-                    if let viewers = category.viewerCount {
-                        Text("\(viewers) watching")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(category.name)
+                            .font(.title.weight(.bold))
+                        if let viewers = category.viewerCount {
+                            Text("\(viewers) watching")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+
+                    if service.isLoadingStreams && service.categoryStreams.isEmpty {
+                        ProgressView().scaleEffect(0.85)
+                    }
+
+                    Spacer()
+                }
+                .focusSection()
+
+                if let err = service.streamsErrorMessage {
+                    Text(err)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
                 }
 
-                if service.isLoadingStreams && service.categoryStreams.isEmpty {
-                    ProgressView().scaleEffect(0.85)
-                }
-
-                Spacer()
-            }
-            .focusSection()
-
-            if let err = service.streamsErrorMessage {
-                Text(err)
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-            }
-
-            if !service.isLoadingStreams && service.categoryStreams.isEmpty && service.streamsErrorMessage == nil {
-                Text("No live streams found for \(category.name) right now.")
-                    .foregroundStyle(.secondary)
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
+                if !service.isLoadingStreams && service.categoryStreams.isEmpty && service.streamsErrorMessage == nil {
+                    Text("No live streams found for \(category.name) right now.")
+                        .foregroundStyle(.secondary)
+                } else {
                     LazyVGrid(columns: columns, spacing: gridSpacing) {
                         ForEach(service.categoryStreams) { channel in
                             let isFocused = focusedStreamID == channel.id
@@ -201,20 +201,19 @@ private struct BrowseStreamsView: View {
                             .zIndex(isFocused ? 2 : 0)
                         }
                     }
-                    .padding(.vertical, 8)
+                    .focusSection()
 
                     if service.isLoadingStreams && !service.categoryStreams.isEmpty {
                         ProgressView()
                             .padding(.vertical, 24)
                     }
                 }
-                .scrollClipDisabled()
-                .focusSection()
             }
-
-            Spacer(minLength: 0)
+            .padding(.vertical, 8)
         }
+        .scrollClipDisabled()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onExitCommand { onBack() }
         .onChange(of: focusedStreamID) { _, newID in
             // On tvOS, scrolling is driven by focus movement, so load more pages
             // as focus approaches the end of the loaded grid.
@@ -290,21 +289,19 @@ private struct BrowseChannelCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .bottomLeading) {
+                Color.white.opacity(0.08)
+
                 AsyncImage(url: channel.thumbnailURL) { img in
                     img.resizable().scaledToFill()
                 } placeholder: {
-                    Color.white.opacity(0.08)
+                    Color.clear
                 }
-                .aspectRatio(16 / 9, contentMode: .fill)
-                .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
 
                 LinearGradient(
                     colors: [Color.clear, Color.black.opacity(0.82)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .aspectRatio(16 / 9, contentMode: .fill)
-                .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
 
                 HStack(spacing: 8) {
                     Circle()
@@ -318,6 +315,9 @@ private struct BrowseChannelCard: View {
                 }
                 .padding(12)
             }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
 
             Text(channel.displayName)
                 .font(.subheadline.weight(.semibold))
@@ -327,7 +327,8 @@ private struct BrowseChannelCard: View {
             Text(channel.title.isEmpty ? "No title" : channel.title)
                 .font(.footnote)
                 .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
-                .lineLimit(2)
+                .lineLimit(2, reservesSpace: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(focusInset)
         .background {
