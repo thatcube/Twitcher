@@ -710,7 +710,6 @@ struct PlayerView: View {
             .textFieldStyle(.plain)
             .font(.callout)
             .lineLimit(1)
-            .padding(.top, 4)
             .focused($focus, equals: .chatInput)
             .onMoveCommand { direction in
               switch direction {
@@ -754,7 +753,6 @@ struct PlayerView: View {
             }
           }
         }
-        .frame(minHeight: 56)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
         Text("Sign in to send messages")
