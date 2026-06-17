@@ -936,6 +936,7 @@ struct PlayerView: View {
             placeholder: "Send a message",
             isFocused: focus == .chatInput
           )
+          .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
           // Match the send button feel: the input grows when focused.
           .frame(height: hasChatDraft ? chatInputFocusedHeight : (focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight))
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
@@ -1002,6 +1003,7 @@ struct PlayerView: View {
             scheduleHide()
           }
         )
+        .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
         // Keep the signed-out prompt visually aligned with the active input.
         .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
         .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
@@ -1776,6 +1778,27 @@ private struct ChatSettingsPillButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .opacity(configuration.isPressed ? 0.92 : 1.0)
+  }
+}
+
+/// Gives the chat composer field a glassy shell while preserving the UIKit
+/// text field behavior and focus handling.
+private struct ChatInputShellStyle: ViewModifier {
+  let isFocused: Bool
+
+  private var shape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: 16, style: .continuous)
+  }
+
+  func body(content: Content) -> some View {
+    content
+      .padding(.horizontal, 16)
+      .background(.ultraThinMaterial, in: shape)
+      .overlay(
+        shape
+          .stroke(.white.opacity(isFocused ? 0.72 : 0.24), lineWidth: 1)
+      )
+      .shadow(color: .black.opacity(isFocused ? 0.24 : 0.14), radius: isFocused ? 10 : 6, x: 0, y: 3)
   }
 }
 
