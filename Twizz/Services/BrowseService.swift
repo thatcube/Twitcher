@@ -12,7 +12,7 @@ final class BrowseService {
     private(set) var isLoadingStreams = false
     private(set) var streamsErrorMessage: String?
     private(set) var hasMoreStreams = false
-    private var streamsCursor: String?
+    private var loadedFullStreams = false
 
     // MARK: - Public API
 
@@ -32,32 +32,35 @@ final class BrowseService {
         isLoadingStreams = true
         streamsErrorMessage = nil
         categoryStreams = []
-        streamsCursor = nil
+        loadedFullStreams = false
         hasMoreStreams = false
         defer { isLoadingStreams = false }
 
         do {
-            let result = try await fetchStreams(for: category, limit: 12, after: nil)
-            categoryStreams = result.channels
-            streamsCursor = result.cursor
-            hasMoreStreams = result.hasMore
+            // Fast initial batch for instant render. Twitch's anonymous GQL
+            // client rejects cursor pagination (integrity challenge), so we
+            // fetch a small first page, then the full set (capped at 100).
+            categoryStreams = try await fetchStreams(for: category, limit: 30)
+            hasMoreStreams = categoryStreams.count >= 30
         } catch {
             streamsErrorMessage = "Could not load streams for \(category.name)."
         }
     }
 
     func loadMoreStreams(for category: TwitchCategory) async {
-        guard hasMoreStreams, !isLoadingStreams, let cursor = streamsCursor else { return }
+        guard hasMoreStreams, !loadedFullStreams, !isLoadingStreams else { return }
         isLoadingStreams = true
+        loadedFullStreams = true
+        hasMoreStreams = false
         defer { isLoadingStreams = false }
 
         do {
-            let result = try await fetchStreams(for: category, limit: 12, after: cursor)
-            categoryStreams.append(contentsOf: result.channels)
-            streamsCursor = result.cursor
-            hasMoreStreams = result.hasMore
+            let full = try await fetchStreams(for: category, limit: 100)
+            let existingIDs = Set(categoryStreams.map(\.id))
+            let additions = full.filter { !existingIDs.contains($0.id) }
+            categoryStreams.append(contentsOf: additions)
         } catch {
-            // Silently ignore pagination errors
+            // Keep the initial batch already on screen.
         }
     }
 
@@ -116,9 +119,8 @@ final class BrowseService {
 
     private func fetchStreams(
         for category: TwitchCategory,
-        limit: Int,
-        after: String?
-    ) async throws -> (channels: [FollowedChannel], cursor: String?, hasMore: Bool) {
+        limit: Int
+    ) async throws -> [FollowedChannel] {
         struct StreamNode: Decodable {
             let id: String?
             let title: String?
@@ -132,24 +134,20 @@ final class BrowseService {
             }
         }
         struct StreamEdge: Decodable {
-            let cursor: String?
             let node: StreamNode?
         }
-        struct PageInfo: Decodable { let hasNextPage: Bool? }
         struct StreamsConn: Decodable {
             let edges: [StreamEdge]?
-            let pageInfo: PageInfo?
         }
         struct GameResult: Decodable { let streams: StreamsConn? }
         struct GQLData: Decodable { let game: GameResult? }
         struct GQLEnvelope: Decodable { let data: GQLData? }
 
         let query = """
-            query GameStreams($id: ID!, $first: Int!, $after: Cursor) {
+            query GameStreams($id: ID!, $first: Int!) {
               game(id: $id) {
-                streams(first: $first, after: $after) {
+                streams(first: $first) {
                   edges {
-                    cursor
                     node {
                       id
                       title
@@ -161,24 +159,17 @@ final class BrowseService {
                       }
                     }
                   }
-                  pageInfo {
-                    hasNextPage
-                  }
                 }
               }
             }
             """
 
-        var variables: [String: Any] = ["id": category.id, "first": limit]
-        if let after { variables["after"] = after }
-        let responseData = try await performGQL(query: query, variables: variables)
+        let responseData = try await performGQL(
+            query: query, variables: ["id": category.id, "first": limit])
         let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
-        let conn = decoded.data?.game?.streams
-        let edges = conn?.edges ?? []
-        let hasMore = conn?.pageInfo?.hasNextPage ?? false
-        let lastCursor = edges.last?.cursor
+        let edges = decoded.data?.game?.streams?.edges ?? []
 
-        let channels = edges.compactMap { edge -> FollowedChannel? in
+        return edges.compactMap { edge -> FollowedChannel? in
             guard let node = edge.node,
                   let broadcaster = node.broadcaster,
                   let login = broadcaster.login?.trimmingCharacters(in: .whitespaces),
@@ -202,7 +193,6 @@ final class BrowseService {
                 isLive: true
             )
         }
-        return (channels, lastCursor, hasMore)
     }
 
     // MARK: - GQL Transport
