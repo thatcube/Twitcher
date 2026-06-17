@@ -630,11 +630,19 @@ struct PlayerView: View {
         Image(systemName: showChatSettings ? "xmark" : "slider.horizontal.3")
           .font(.system(size: 22, weight: .semibold))
           .frame(width: 30, height: 30)
+          .foregroundStyle(.white)
+          .padding(8)
+          .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+              .fill(.white.opacity(focus == .chatSettingsButton ? 0.20 : 0.08))
+          )
+          .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+              .stroke(.white.opacity(focus == .chatSettingsButton ? 0.62 : 0.18), lineWidth: 1)
+          )
       }
-      .TwizzControlButtonStyle()
+      .buttonStyle(.plain)
       .focusEffectDisabled()
-      .scaleEffect(focus == .chatSettingsButton ? 0.84 : 1.0)
-      .animation(.easeOut(duration: 0.12), value: focus == .chatSettingsButton)
       .focused($focus, equals: .chatSettingsButton)
       .onMoveCommand { direction in
         if direction == .down, showChatSettings {
@@ -782,13 +790,13 @@ struct PlayerView: View {
           isFocused: focus == .youtubeMergeURL
         )
         .frame(height: 44)
-        .frame(width: 384)
-        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity)
         .background(.white.opacity(focus == .youtubeMergeURL ? 0.86 : 0.09), in: RoundedRectangle(cornerRadius: 11))
         .overlay(
           RoundedRectangle(cornerRadius: 11)
             .stroke(.white.opacity(0.22), lineWidth: 1)
         )
+        .clipped()
         .focused($focus, equals: .youtubeMergeURL)
         .onMoveCommand { direction in
           if direction == .left {
@@ -797,10 +805,18 @@ struct PlayerView: View {
         }
 
         if let status = chat.youtubeStatusMessage, experimentalYouTubeMergeEnabled {
-          Text(status)
-            .font(.caption2)
-            .foregroundStyle(.white.opacity(0.76))
-            .fixedSize(horizontal: false, vertical: true)
+          HStack(spacing: 6) {
+            if status.hasPrefix("YouTube chat connected") {
+              Image(systemName: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+            }
+
+            Text(status)
+              .font(.caption2)
+              .foregroundStyle(.white.opacity(0.76))
+              .fixedSize(horizontal: false, vertical: true)
+          }
         }
       }
       .focusSection()
@@ -842,17 +858,28 @@ struct PlayerView: View {
       .padding(.vertical, 7)
       .background(
         RoundedRectangle(cornerRadius: 11, style: .continuous)
-          .fill(.white.opacity(isSelected ? 0.20 : 0.08))
+          .fill(
+            .white.opacity(
+              isFocused
+                ? (isSelected ? 0.30 : 0.18)
+                : (isSelected ? 0.20 : 0.08)
+            )
+          )
       )
       .overlay(
         RoundedRectangle(cornerRadius: 11, style: .continuous)
-          .stroke(.white.opacity(isSelected ? 0.42 : 0.18), lineWidth: 1)
+          .stroke(
+            .white.opacity(
+              isFocused
+                ? (isSelected ? 0.78 : 0.58)
+                : (isSelected ? 0.42 : 0.18)
+            ),
+            lineWidth: 1
+          )
       )
     }
     .buttonStyle(.plain)
     .focusEffectDisabled()
-    .scaleEffect(isFocused ? 0.84 : 1.0)
-    .animation(.easeOut(duration: 0.12), value: isFocused)
     .focused($focus, equals: focusTag)
   }
 
@@ -1736,11 +1763,17 @@ private struct ChatInputField: UIViewRepresentable {
     field.delegate = context.coordinator
     field.borderStyle = .none
     field.backgroundColor = .clear
+    field.clipsToBounds = true
     field.textColor = .white
     field.tintColor = .white
     field.font = .preferredFont(forTextStyle: .callout)
     field.contentVerticalAlignment = .center
     field.adjustsFontForContentSizeCategory = true
+    field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
+    field.leftViewMode = .always
+    field.rightView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
+    field.rightViewMode = .always
     field.attributedPlaceholder = NSAttributedString(
       string: placeholder,
       attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.45)]

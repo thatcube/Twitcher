@@ -329,7 +329,7 @@ final class ChatService {
           continuationToken = bootstrap.continuation
           apiKey = bootstrap.apiKey
           clientVersion = bootstrap.clientVersion
-          youtubeStatusMessage = "YouTube chat connected (experimental)."
+          youtubeStatusMessage = "YouTube chat connected."
         }
 
         guard let currentContinuation = continuationToken,
@@ -356,7 +356,7 @@ final class ChatService {
         try? await Task.sleep(for: .milliseconds(Int(clampedDelay)))
       } catch {
         if Task.isCancelled { break }
-        youtubeStatusMessage = "YouTube chat unavailable right now (experimental)."
+        youtubeStatusMessage = "YouTube chat unavailable right now."
 
         // Re-bootstrap after failures because continuation tokens can expire.
         videoID = nil
