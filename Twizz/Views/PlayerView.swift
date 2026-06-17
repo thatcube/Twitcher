@@ -623,7 +623,7 @@ struct PlayerView: View {
           .foregroundStyle(.white.opacity(0.84))
           .textCase(.uppercase)
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatTextSizeOption.allCases.enumerated()), id: \.offset) { index, option in
             settingsPill(
               title: option.title,
@@ -643,7 +643,7 @@ struct PlayerView: View {
           .foregroundStyle(.white.opacity(0.84))
           .textCase(.uppercase)
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatLineHeightOption.allCases.enumerated()), id: \.offset) { index, option in
             settingsPill(
               title: option.title,
@@ -663,7 +663,7 @@ struct PlayerView: View {
           .foregroundStyle(.white.opacity(0.84))
           .textCase(.uppercase)
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatLineSpacingOption.allCases.enumerated()), id: \.offset) { index, option in
             settingsPill(
               title: option.title,
@@ -683,7 +683,7 @@ struct PlayerView: View {
           .foregroundStyle(.white.opacity(0.84))
           .textCase(.uppercase)
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatWidthMode.allCases.enumerated()), id: \.offset) { index, mode in
             settingsPill(
               title: mode.title,
@@ -703,7 +703,7 @@ struct PlayerView: View {
           .foregroundStyle(.white.opacity(0.84))
           .textCase(.uppercase)
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatLayoutMode.allCases.enumerated()), id: \.offset) { index, mode in
             settingsPill(
               title: mode.title,
