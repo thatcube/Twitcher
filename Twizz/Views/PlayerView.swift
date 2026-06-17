@@ -114,7 +114,7 @@ struct PlayerView: View {
   private let startupPlaybackPollMilliseconds: UInt64 = 500
   private let stalledPlaybackThresholdSamples = 6
   private let playbackWatchdogIntervalSeconds: Double = 2
-  private let chatReplayWindowSeconds: TimeInterval = 5
+  private let chatReplayWindowSeconds: TimeInterval = 60
   private let chatComposerRowHeight: CGFloat = 62
   private let chatInputFocusedHeight: CGFloat = 62
   private let chatInputUnfocusedHeight: CGFloat = 54
