@@ -114,10 +114,11 @@ struct PlayerView: View {
   /// can sit much closer to the edge; without it we keep a safer cushion.
   private var targetLiveEdgeSeconds: Double { lowLatencyProxyEnabled ? 2.0 : 3.5 }
   private var softCatchUpThresholdSeconds: Double { lowLatencyProxyEnabled ? 5 : 8 }
-  /// In low-latency mode, snap to the edge much sooner (and re-snap more often)
-  /// so we don't sit parked several seconds back relying only on mild speed-ups.
-  private var hardCatchUpThresholdSeconds: Double { lowLatencyProxyEnabled ? 7 : 14 }
-  private var hardCatchUpCooldownSeconds: Double { lowLatencyProxyEnabled ? 12 : 20 }
+  // Hard catch-up stays conservative even in low-latency mode: zero-tolerance
+  // seeks toward an edge made of just-promoted prefetch segments tend to
+  // rebuffer and oscillate, which raises latency instead of lowering it.
+  private let hardCatchUpThresholdSeconds: Double = 14
+  private let hardCatchUpCooldownSeconds: Double = 20
   private let maxCatchUpRate: Float = 1.04
   private let edgeLatencyUnavailableEpsilonSeconds: Double = 0.2
   private let edgeLatencyUnavailableSamples = 4
@@ -348,6 +349,7 @@ struct PlayerView: View {
     }
     .onChange(of: lowLatencyProxyEnabled) { _, _ in
       // Rebuild the asset pipeline so the proxy is attached/detached cleanly.
+      configurePlayerForLive()
       Task { await load(reason: "lowLatencyToggle", resetMetadata: false) }
     }
     .fullScreenCover(isPresented: $showSignInSheet) {
@@ -1656,8 +1658,10 @@ struct PlayerView: View {
   }
 
   private func configurePlayerForLive() {
-    // Prefer reliable startup; latency is corrected by explicit catch-up logic.
-    player.automaticallyWaitsToMinimizeStalling = true
+    // In low-latency mode, don't let AVPlayer hold back extra buffer to avoid
+    // stalls — that hold-back is a big part of steady-state latency. Off-mode
+    // keeps the safer default. This is the main non-oscillating latency lever.
+    player.automaticallyWaitsToMinimizeStalling = !lowLatencyProxyEnabled
   }
 
   private func startPlayback() {
