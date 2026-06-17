@@ -100,6 +100,8 @@ struct PlayerView: View {
     private let wallClockStaleDateDeltaEpsilonSeconds: Double = 0.08
     private let wallClockStalePlaybackAdvanceThresholdSeconds: Double = 0.6
     private let resolveTimeoutSeconds: Double = 18
+    private let startupPlaybackTimeoutSeconds: Double = 14
+    private let startupPlaybackPollMilliseconds: UInt64 = 500
     private let stalledPlaybackThresholdSamples = 6
     private let playbackWatchdogIntervalSeconds: Double = 2
 
@@ -783,11 +785,14 @@ struct PlayerView: View {
 
     private enum LoadTimeoutError: LocalizedError {
         case timedOut
+        case noPlaybackProgress
 
         var errorDescription: String? {
             switch self {
             case .timedOut:
                 return "Timed out while loading this stream."
+            case .noPlaybackProgress:
+                return "Stream did not start playback in time."
             }
         }
     }
@@ -808,6 +813,12 @@ struct PlayerView: View {
                 player.replaceCurrentItem(with: makeItem(url: resolved.master))
                 applyQualityPreference(preferredQuality)
                 startPlayback()
+
+                let started = await waitForPlaybackStart()
+                if !started {
+                    throw LoadTimeoutError.noPlaybackProgress
+                }
+
                 startLatencyMonitor()
                 startPlaybackWatchdog()
                 consecutiveLoadFailures = 0
@@ -815,6 +826,8 @@ struct PlayerView: View {
                 return
             } catch {
                 lastError = error
+                player.pause()
+                player.replaceCurrentItem(with: nil)
                 if attempt < maxAttempts {
                     try? await Task.sleep(for: .seconds(Double(attempt)))
                 }
@@ -845,6 +858,34 @@ struct PlayerView: View {
             group.cancelAll()
             return first
         }
+    }
+
+    private func waitForPlaybackStart() async -> Bool {
+        let deadline = Date().addingTimeInterval(startupPlaybackTimeoutSeconds)
+
+        while Date() < deadline {
+            if Task.isCancelled {
+                return false
+            }
+
+            if let item = player.currentItem {
+                if item.status == .failed {
+                    return false
+                }
+
+                let currentSeconds = CMTimeGetSeconds(item.currentTime())
+                if player.timeControlStatus == .playing {
+                    return true
+                }
+                if currentSeconds.isFinite, currentSeconds > 0.2 {
+                    return true
+                }
+            }
+
+            try? await Task.sleep(nanoseconds: startupPlaybackPollMilliseconds * 1_000_000)
+        }
+
+        return false
     }
 
     /// Keeps the player on the master playlist for video qualities so caption
