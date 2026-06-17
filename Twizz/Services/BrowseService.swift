@@ -1,0 +1,186 @@
+import Foundation
+import Observation
+
+@MainActor
+@Observable
+final class BrowseService {
+    private(set) var categories: [TwitchCategory] = []
+    private(set) var isLoadingCategories = false
+    private(set) var categoryErrorMessage: String?
+
+    private(set) var categoryStreams: [FollowedChannel] = []
+    private(set) var isLoadingStreams = false
+    private(set) var streamsErrorMessage: String?
+
+    // MARK: - Public API
+
+    func loadCategories() async {
+        isLoadingCategories = true
+        categoryErrorMessage = nil
+        defer { isLoadingCategories = false }
+
+        do {
+            categories = try await fetchTopCategories(limit: 40)
+        } catch {
+            categoryErrorMessage = "Could not load categories."
+        }
+    }
+
+    func loadStreams(for category: TwitchCategory) async {
+        isLoadingStreams = true
+        streamsErrorMessage = nil
+        categoryStreams = []
+        defer { isLoadingStreams = false }
+
+        do {
+            categoryStreams = try await fetchStreams(for: category, limit: 24)
+        } catch {
+            streamsErrorMessage = "Could not load streams for \(category.name)."
+        }
+    }
+
+    // MARK: - GQL: Top Categories
+
+    private func fetchTopCategories(limit: Int) async throws -> [TwitchCategory] {
+        struct GameNode: Decodable {
+            let id: String?
+            let name: String?
+            let displayName: String?
+            let boxArtURL: String?
+            let viewersCount: Int?
+        }
+        struct GameEdge: Decodable { let node: GameNode? }
+        struct TopGamesConn: Decodable { let edges: [GameEdge]? }
+        struct GQLData: Decodable { let topGames: TopGamesConn? }
+        struct GQLEnvelope: Decodable { let data: GQLData? }
+
+        let query = """
+            query TopGames($first: Int!) {
+              topGames(first: $first) {
+                edges {
+                  node {
+                    id
+                    name
+                    displayName
+                    boxArtURL(width: 285, height: 380)
+                    viewersCount
+                  }
+                }
+              }
+            }
+            """
+
+        let responseData = try await performGQL(
+            query: query, variables: ["first": limit])
+        let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
+        let edges = decoded.data?.topGames?.edges ?? []
+
+        return edges.compactMap { edge -> TwitchCategory? in
+            guard let node = edge.node,
+                  let id = node.id,
+                  let name = (node.displayName ?? node.name)?.trimmingCharacters(in: .whitespaces),
+                  !name.isEmpty
+            else { return nil }
+
+            let boxArtURL = node.boxArtURL.flatMap { URL(string: $0) }
+            return TwitchCategory(
+                id: id,
+                name: name,
+                boxArtURL: boxArtURL,
+                viewerCount: node.viewersCount
+            )
+        }
+    }
+
+    // MARK: - GQL: Streams by Category
+
+    private func fetchStreams(for category: TwitchCategory, limit: Int) async throws -> [FollowedChannel] {
+        struct StreamNode: Decodable {
+            let id: String?
+            let title: String?
+            let viewersCount: Int?
+            let previewImageURL: String?
+            let broadcaster: Broadcaster?
+
+            struct Broadcaster: Decodable {
+                let login: String?
+                let displayName: String?
+            }
+        }
+        struct StreamEdge: Decodable { let node: StreamNode? }
+        struct StreamsConn: Decodable { let edges: [StreamEdge]? }
+        struct GameResult: Decodable { let streams: StreamsConn? }
+        struct GQLData: Decodable { let game: GameResult? }
+        struct GQLEnvelope: Decodable { let data: GQLData? }
+
+        let query = """
+            query GameStreams($id: ID!, $first: Int!) {
+              game(id: $id) {
+                streams(first: $first) {
+                  edges {
+                    node {
+                      id
+                      title
+                      viewersCount
+                      previewImageURL(width: 640, height: 360)
+                      broadcaster {
+                        login
+                        displayName
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """
+
+        let responseData = try await performGQL(
+            query: query, variables: ["id": category.id, "first": limit])
+        let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
+        let edges = decoded.data?.game?.streams?.edges ?? []
+
+        return edges.compactMap { edge -> FollowedChannel? in
+            guard let node = edge.node,
+                  let broadcaster = node.broadcaster,
+                  let login = broadcaster.login?.trimmingCharacters(in: .whitespaces),
+                  !login.isEmpty
+            else { return nil }
+
+            let streamID = node.id ?? UUID().uuidString
+            let displayName = broadcaster.displayName?.trimmingCharacters(in: .whitespaces) ?? login
+            let title = node.title?.trimmingCharacters(in: .whitespaces) ?? "Live now"
+            let previewURL = node.previewImageURL.flatMap { URL(string: $0) }
+
+            return FollowedChannel(
+                id: streamID,
+                login: login,
+                displayName: displayName,
+                title: title,
+                gameName: category.name,
+                viewerCount: node.viewersCount,
+                thumbnailURL: previewURL,
+                profileImageURL: nil,
+                isLive: true
+            )
+        }
+    }
+
+    // MARK: - GQL Transport
+
+    private func performGQL(query: String, variables: [String: Any]) async throws -> Data {
+        var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("kimne78kx3ncx6brgo4mv6wki5h1ko", forHTTPHeaderField: "Client-Id")
+        req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+
+        let payload: [String: Any] = ["query": query, "variables": variables]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard (200...299).contains((response as? HTTPURLResponse)?.statusCode ?? -1) else {
+            throw URLError(.badServerResponse)
+        }
+        return data
+    }
+}

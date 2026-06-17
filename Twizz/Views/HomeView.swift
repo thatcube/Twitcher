@@ -24,6 +24,7 @@ struct HomeView: View {
 
   private enum TopTab: String, CaseIterable, Identifiable {
     case home = "Home"
+    case browse = "Browse"
 
     var id: String { rawValue }
   }
@@ -48,6 +49,12 @@ struct HomeView: View {
 
         if selectedTopTab == .home {
           homeTab
+        } else if selectedTopTab == .browse {
+          BrowseView(
+            auth: auth,
+            pagePadding: pagePadding,
+            selectedChannel: $selectedChannel
+          )
         }
       }
       .padding(pagePadding)
