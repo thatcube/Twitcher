@@ -11,6 +11,8 @@ final class BrowseService {
     private(set) var categoryStreams: [FollowedChannel] = []
     private(set) var isLoadingStreams = false
     private(set) var streamsErrorMessage: String?
+    private(set) var hasMoreStreams = false
+    private var streamsCursor: String?
 
     // MARK: - Public API
 
@@ -30,12 +32,32 @@ final class BrowseService {
         isLoadingStreams = true
         streamsErrorMessage = nil
         categoryStreams = []
+        streamsCursor = nil
+        hasMoreStreams = false
         defer { isLoadingStreams = false }
 
         do {
-            categoryStreams = try await fetchStreams(for: category, limit: 24)
+            let result = try await fetchStreams(for: category, limit: 12, after: nil)
+            categoryStreams = result.channels
+            streamsCursor = result.cursor
+            hasMoreStreams = result.hasMore
         } catch {
             streamsErrorMessage = "Could not load streams for \(category.name)."
+        }
+    }
+
+    func loadMoreStreams(for category: TwitchCategory) async {
+        guard hasMoreStreams, !isLoadingStreams, let cursor = streamsCursor else { return }
+        isLoadingStreams = true
+        defer { isLoadingStreams = false }
+
+        do {
+            let result = try await fetchStreams(for: category, limit: 12, after: cursor)
+            categoryStreams.append(contentsOf: result.channels)
+            streamsCursor = result.cursor
+            hasMoreStreams = result.hasMore
+        } catch {
+            // Silently ignore pagination errors
         }
     }
 
@@ -92,7 +114,11 @@ final class BrowseService {
 
     // MARK: - GQL: Streams by Category
 
-    private func fetchStreams(for category: TwitchCategory, limit: Int) async throws -> [FollowedChannel] {
+    private func fetchStreams(
+        for category: TwitchCategory,
+        limit: Int,
+        after: String?
+    ) async throws -> (channels: [FollowedChannel], cursor: String?, hasMore: Bool) {
         struct StreamNode: Decodable {
             let id: String?
             let title: String?
@@ -105,17 +131,25 @@ final class BrowseService {
                 let displayName: String?
             }
         }
-        struct StreamEdge: Decodable { let node: StreamNode? }
-        struct StreamsConn: Decodable { let edges: [StreamEdge]? }
+        struct StreamEdge: Decodable {
+            let cursor: String?
+            let node: StreamNode?
+        }
+        struct PageInfo: Decodable { let hasNextPage: Bool? }
+        struct StreamsConn: Decodable {
+            let edges: [StreamEdge]?
+            let pageInfo: PageInfo?
+        }
         struct GameResult: Decodable { let streams: StreamsConn? }
         struct GQLData: Decodable { let game: GameResult? }
         struct GQLEnvelope: Decodable { let data: GQLData? }
 
         let query = """
-            query GameStreams($id: ID!, $first: Int!) {
+            query GameStreams($id: ID!, $first: Int!, $after: String) {
               game(id: $id) {
-                streams(first: $first) {
+                streams(first: $first, after: $after) {
                   edges {
+                    cursor
                     node {
                       id
                       title
@@ -127,17 +161,24 @@ final class BrowseService {
                       }
                     }
                   }
+                  pageInfo {
+                    hasNextPage
+                  }
                 }
               }
             }
             """
 
-        let responseData = try await performGQL(
-            query: query, variables: ["id": category.id, "first": limit])
+        var variables: [String: Any] = ["id": category.id, "first": limit]
+        if let after { variables["after"] = after }
+        let responseData = try await performGQL(query: query, variables: variables)
         let decoded = try JSONDecoder().decode(GQLEnvelope.self, from: responseData)
-        let edges = decoded.data?.game?.streams?.edges ?? []
+        let conn = decoded.data?.game?.streams
+        let edges = conn?.edges ?? []
+        let hasMore = conn?.pageInfo?.hasNextPage ?? false
+        let lastCursor = edges.last?.cursor
 
-        return edges.compactMap { edge -> FollowedChannel? in
+        let channels = edges.compactMap { edge -> FollowedChannel? in
             guard let node = edge.node,
                   let broadcaster = node.broadcaster,
                   let login = broadcaster.login?.trimmingCharacters(in: .whitespaces),
@@ -161,6 +202,7 @@ final class BrowseService {
                 isLive: true
             )
         }
+        return (channels, lastCursor, hasMore)
     }
 
     // MARK: - GQL Transport
