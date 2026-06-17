@@ -114,8 +114,8 @@ struct SignInView: View {
   private var codeView: some View {
     if let code = auth.activationCode {
       Text(code)
-        .font(.system(size: 96, weight: .black, design: .monospaced))
-        .tracking(8)
+        .font(.system(size: 200, weight: .black, design: .monospaced))
+        .tracking(12)
         .lineLimit(1)
         .minimumScaleFactor(0.5)
     } else {
