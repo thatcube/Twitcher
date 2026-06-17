@@ -633,6 +633,8 @@ struct PlayerView: View {
       }
       .TwizzControlButtonStyle()
       .focusEffectDisabled()
+      .scaleEffect(focus == .chatSettingsButton ? 0.84 : 1.0)
+      .animation(.easeOut(duration: 0.12), value: focus == .chatSettingsButton)
       .focused($focus, equals: .chatSettingsButton)
       .onMoveCommand { direction in
         if direction == .down, showChatSettings {
@@ -829,7 +831,9 @@ struct PlayerView: View {
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
-    Button(action: action) {
+    let isFocused = focus == focusTag
+
+    return Button(action: action) {
       HStack(spacing: 8) {
         if isSelected {
           Image(systemName: "checkmark")
@@ -852,6 +856,8 @@ struct PlayerView: View {
     }
     .buttonStyle(.plain)
     .focusEffectDisabled()
+    .scaleEffect(isFocused ? 0.84 : 1.0)
+    .animation(.easeOut(duration: 0.12), value: isFocused)
     .focused($focus, equals: focusTag)
   }
 
