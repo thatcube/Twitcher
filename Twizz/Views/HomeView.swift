@@ -78,6 +78,7 @@ struct HomeView: View {
       .tabItem { Text("Settings") }
       .tag(TopTab.settings)
     }
+    .preferredNativeTabBarPlacementIfAvailable()
     .background(
       LinearGradient(
         colors: resolvedPalette.backgroundColors,
@@ -604,4 +605,15 @@ private struct HomeCategoryCard: View {
 
 #Preview {
   HomeView(deepLinkRouter: DeepLinkRouter())
+}
+
+private extension View {
+  @ViewBuilder
+  func preferredNativeTabBarPlacementIfAvailable() -> some View {
+    if #available(tvOS 27.0, *) {
+      self.defaultTabBarPlacement(.tabBar)
+    } else {
+      self
+    }
+  }
 }
