@@ -136,9 +136,14 @@ struct SignInView: View {
         .foregroundStyle(.orange)
         .multilineTextAlignment(.center)
     } else if let status = auth.statusMessage {
-      Text(status)
-        .font(.headline)
-        .foregroundStyle(.secondary)
+      HStack(spacing: 16) {
+        if auth.isAuthenticating {
+          PulsingDots()
+        }
+        Text(status)
+          .font(.headline)
+          .foregroundStyle(.secondary)
+      }
     }
   }
 
@@ -187,6 +192,32 @@ struct SignInView: View {
     let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
     guard let cgImage = ciContext.createCGImage(scaled, from: scaled.extent) else { return nil }
     return UIImage(cgImage: cgImage)
+  }
+}
+
+/// Three dots that fade and scale in sequence to signal ongoing background work
+/// (e.g. polling Twitch for authorization).
+private struct PulsingDots: View {
+  private let dotCount = 3
+  @State private var isAnimating = false
+
+  var body: some View {
+    HStack(spacing: 10) {
+      ForEach(0..<dotCount, id: \.self) { index in
+        Circle()
+          .fill(Color(red: 0.58, green: 0.41, blue: 0.96))
+          .frame(width: 14, height: 14)
+          .scaleEffect(isAnimating ? 1.0 : 0.4)
+          .opacity(isAnimating ? 1.0 : 0.3)
+          .animation(
+            .easeInOut(duration: 0.6)
+              .repeatForever(autoreverses: true)
+              .delay(Double(index) * 0.2),
+            value: isAnimating
+          )
+      }
+    }
+    .onAppear { isAnimating = true }
   }
 }
 
