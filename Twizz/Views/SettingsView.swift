@@ -33,6 +33,9 @@ struct SettingsView: View {
         .padding(.vertical, 60)
       }
       .scrollClipDisabled()
+      // Give tvOS a concrete focus entry point into the tab content; without a
+      // default target the focus engine can fail to enter and nothing highlights.
+      .defaultFocus($focusedTheme, themeManager.theme)
     }
   }
 
