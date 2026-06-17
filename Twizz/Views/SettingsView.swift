@@ -262,6 +262,12 @@ private struct AboutSection: View {
   var body: some View {
     HStack(alignment: .top, spacing: 32) {
       VStack(alignment: .leading, spacing: 16) {
+        Image("TwizzPixelLogo")
+          .resizable()
+          .interpolation(.none)
+          .scaledToFit()
+          .frame(width: 72, height: 72)
+
         Text("About")
           .font(.system(size: 32, weight: .bold))
 
