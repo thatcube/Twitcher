@@ -884,7 +884,7 @@ struct PlayerView: View {
           )
       )
     }
-    .buttonStyle(.plain)
+    .buttonStyle(ChatSettingsPillButtonStyle())
     .focusEffectDisabled()
     .focused($focus, equals: focusTag)
   }
@@ -923,10 +923,10 @@ struct PlayerView: View {
             isFocused: focus == .chatInput
           )
           // Match the send button feel: the input grows when focused.
-          .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
+          .frame(height: hasChatDraft ? chatInputFocusedHeight : (focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight))
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
           // Reserve trailing text space only when the send button is visible.
-          .padding(.trailing, hasChatDraft ? (focus == .chatSend ? 92 : 82) : 0)
+          .padding(.trailing, hasChatDraft ? 108 : 0)
           .frame(maxWidth: .infinity)
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in
@@ -956,6 +956,8 @@ struct PlayerView: View {
               }
             }
             .TwizzControlButtonStyle()
+            .frame(height: chatInputFocusedHeight)
+            .padding(.trailing, 8)
             .disabled(isSendingChat)
             .focused($focus, equals: .chatSend)
             .transition(.opacity)
@@ -1750,6 +1752,13 @@ extension View {
     } else {
       self.buttonStyle(.automatic)
     }
+  }
+}
+
+private struct ChatSettingsPillButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .opacity(configuration.isPressed ? 0.92 : 1.0)
   }
 }
 
