@@ -3,8 +3,9 @@ import SwiftUI
 import UIKit
 
 /// Full-screen account / sign-in page presented from the top-right profile button.
-/// When signed out it shows a large QR code, the activation URL, and the device code
-/// in oversized type so it can be read and scanned from across the room.
+/// When signed out it offers two side-by-side options separated by an "OR" divider:
+/// scan a QR code with a phone, or visit the activation URL and type the device code.
+/// Everything is in oversized type so it can be read and scanned from across the room.
 struct SignInView: View {
   let auth: TwitchAuthSession
   var isEmbedded: Bool = false
@@ -48,37 +49,15 @@ struct SignInView: View {
 
   private var signInContent: some View {
     VStack(spacing: 48) {
-      VStack(spacing: 10) {
-        Text("Sign in with Twitch")
-          .font(.system(size: 64, weight: .bold))
-        Text("Scan the code, or visit the link on your phone or computer.")
-          .font(.title3)
-          .foregroundStyle(.secondary)
-      }
+      HStack(alignment: .center, spacing: 56) {
+        qrOption
 
-      HStack(alignment: .center, spacing: 72) {
-        qrCodeView
+        orDivider
 
-        VStack(alignment: .leading, spacing: 36) {
-          VStack(alignment: .leading, spacing: 8) {
-            Text("1.  Go to")
-              .font(.title2)
-              .foregroundStyle(.secondary)
-            Text(displayURL)
-              .font(.system(size: 72, weight: .heavy, design: .rounded))
-              .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
-          }
-
-          VStack(alignment: .leading, spacing: 8) {
-            Text("2.  Enter code")
-              .font(.title2)
-              .foregroundStyle(.secondary)
-            codeView
-          }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        codeOption
       }
       .padding(.horizontal, 24)
+      .frame(maxWidth: .infinity)
 
       statusArea
 
@@ -92,6 +71,65 @@ struct SignInView: View {
     }
     .padding(80)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  // MARK: - Option: scan QR
+
+  private var qrOption: some View {
+    VStack(spacing: 28) {
+      Text("Scan with your phone")
+        .font(.system(size: 34, weight: .bold))
+
+      qrCodeView
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  // MARK: - Option: enter a code
+
+  private var codeOption: some View {
+    VStack(spacing: 28) {
+      Text("Or enter a code")
+        .font(.system(size: 34, weight: .bold))
+
+      VStack(spacing: 20) {
+        VStack(spacing: 4) {
+          Text("Go to")
+            .font(.title3)
+            .foregroundStyle(.secondary)
+          Text(displayURL)
+            .font(.system(size: 60, weight: .heavy, design: .rounded))
+            .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
+        }
+
+        VStack(spacing: 4) {
+          Text("and enter")
+            .font(.title3)
+            .foregroundStyle(.secondary)
+          codeView
+        }
+      }
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  private var orDivider: some View {
+    VStack(spacing: 16) {
+      Rectangle()
+        .fill(Color.white.opacity(0.15))
+        .frame(width: 2)
+        .frame(maxHeight: .infinity)
+
+      Text("OR")
+        .font(.system(size: 24, weight: .bold))
+        .foregroundStyle(.secondary)
+
+      Rectangle()
+        .fill(Color.white.opacity(0.15))
+        .frame(width: 2)
+        .frame(maxHeight: .infinity)
+    }
+    .frame(height: 460)
   }
 
   @ViewBuilder
@@ -119,8 +157,8 @@ struct SignInView: View {
   private var codeView: some View {
     if let code = auth.activationCode {
       Text(code)
-        .font(.system(size: 200, weight: .black, design: .monospaced))
-        .tracking(12)
+        .font(.system(size: 120, weight: .black, design: .monospaced))
+        .tracking(8)
         .lineLimit(1)
         .minimumScaleFactor(0.5)
     } else {
