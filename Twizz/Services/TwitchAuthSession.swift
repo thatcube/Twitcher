@@ -241,10 +241,10 @@ final class TwitchAuthSession {
             } catch let error as OAuthPollingError {
                 switch error {
                 case .authorizationPending:
-                    statusMessage = "Almost there — finish on your phone or computer."
+                    statusMessage = "Waiting on you…"
                 case .slowDown:
                     pollSeconds += 2
-                    statusMessage = "Almost there — finish on your phone or computer."
+                    statusMessage = "Waiting on you…"
                 case .accessDenied:
                     errorMessage = "Twitch sign-in was canceled."
                     isAuthenticating = false

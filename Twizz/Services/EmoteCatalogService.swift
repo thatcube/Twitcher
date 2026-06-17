@@ -33,6 +33,24 @@ actor EmoteCatalogService {
         return merged
     }
 
+    /// Fetches only the provider-global emote sets (7TV, BTTV, FFZ) with no
+    /// channel context. Useful outside of a channel, e.g. the sign-in screen.
+    func globalCatalog() async -> [String: URL] {
+        let key = "__global__"
+        if let cached = cache[key] { return cached }
+
+        async let sevenTVGlobal = fetch7TVGlobal()
+        async let bttvGlobal = fetchBTTVGlobal()
+        async let ffzGlobal = fetchFFZGlobal()
+
+        let merged = (await sevenTVGlobal)
+            .merging(await bttvGlobal) { _, new in new }
+            .merging(await ffzGlobal) { _, new in new }
+
+        cache[key] = merged
+        return merged
+    }
+
     private func twitchUserID(for login: String) async -> String? {
         var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
