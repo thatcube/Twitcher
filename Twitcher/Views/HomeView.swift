@@ -116,8 +116,10 @@ struct HomeView: View {
             .focused($focusedChannelID, equals: channel.id)
           }
         }
-        .padding(.vertical, 8)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
       }
+      .scrollClipDisabled()
 
       if follows.channels.isEmpty {
         Text(follows.isUsingDemoData ? "No trending channels are available right now." : "No followed channels are available yet.")
@@ -233,10 +235,11 @@ private struct FollowedChannelCard: View {
             .frame(width: 8, height: 8)
           Text(channel.isLive ? "LIVE" : "OFFLINE")
             .font(.caption.weight(.bold))
+            .foregroundStyle(channel.isLive ? Color.white : Color.white.opacity(0.72))
           if let viewerCount = channel.viewerCount {
             Text("\(viewerCount) watching")
               .font(.caption)
-              .foregroundStyle(.secondary)
+              .foregroundStyle(Color.white.opacity(0.78))
           }
         }
         .padding(12)
