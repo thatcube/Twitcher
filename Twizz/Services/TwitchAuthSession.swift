@@ -26,6 +26,7 @@ final class TwitchAuthSession {
 
     private let userDefaults = UserDefaults.standard
     private var pollTask: Task<Void, Never>?
+    private var broadcasterIDCache: [String: String] = [:]
 
     private var clientID: String? {
         guard let raw = Bundle.main.object(forInfoDictionaryKey: "TWITCH_CLIENT_ID") as? String else {
@@ -368,6 +369,143 @@ final class TwitchAuthSession {
             return authError.localizedDescription
         }
         return error.localizedDescription
+    }
+
+    // MARK: - Sending chat
+
+    /// Send a chat message to `channelLogin` on behalf of the signed-in user via
+    /// the Helix "Send Chat Message" endpoint. Requires the `user:write:chat`
+    /// scope. The message echoes back through the anonymous IRC read connection,
+    /// so callers don't need to insert it locally.
+    func sendChatMessage(_ rawText: String, toChannel channelLogin: String) async throws {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        guard isAuthenticated,
+              let clientID,
+              let accessToken,
+              let senderID = userID else {
+            throw ChatSendError.notSignedIn
+        }
+
+        let broadcasterID = try await resolveBroadcasterID(
+            forLogin: channelLogin,
+            clientID: clientID,
+            accessToken: accessToken
+        )
+        try await postChatMessage(
+            text: text,
+            broadcasterID: broadcasterID,
+            senderID: senderID,
+            clientID: clientID,
+            accessToken: accessToken
+        )
+    }
+
+    private func resolveBroadcasterID(
+        forLogin login: String,
+        clientID: String,
+        accessToken: String
+    ) async throws -> String {
+        let normalized = login.lowercased()
+        if let cached = broadcasterIDCache[normalized] {
+            return cached
+        }
+
+        var components = URLComponents(string: "https://api.twitch.tv/helix/users")!
+        components.queryItems = [URLQueryItem(name: "login", value: normalized)]
+
+        var req = URLRequest(url: components.url!)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else {
+            throw makeHTTPError(context: "resolving channel", status: status, data: data)
+        }
+
+        let payload = try JSONDecoder().decode(UserProfileEnvelope.self, from: data)
+        guard let id = payload.data.first?.id else {
+            throw ChatSendError.channelNotFound
+        }
+        broadcasterIDCache[normalized] = id
+        return id
+    }
+
+    private func postChatMessage(
+        text: String,
+        broadcasterID: String,
+        senderID: String,
+        clientID: String,
+        accessToken: String
+    ) async throws {
+        var req = URLRequest(url: URL(string: "https://api.twitch.tv/helix/chat/messages")!)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: String] = [
+            "broadcaster_id": broadcasterID,
+            "sender_id": senderID,
+            "message": text,
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200...299).contains(status) else {
+            throw makeHTTPError(context: "sending message", status: status, data: data)
+        }
+
+        let payload = try JSONDecoder().decode(SendChatMessageEnvelope.self, from: data)
+        guard let result = payload.data.first else { return }
+        if result.isSent == false {
+            throw ChatSendError.dropped(reason: result.dropReason?.message ?? result.dropReason?.code)
+        }
+    }
+}
+
+enum ChatSendError: LocalizedError {
+    case notSignedIn
+    case channelNotFound
+    case dropped(reason: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .notSignedIn:
+            return "Sign in to send messages."
+        case .channelNotFound:
+            return "Couldn't find that channel."
+        case .dropped(let reason):
+            if let reason, !reason.isEmpty {
+                return "Message not sent: \(reason)."
+            }
+            return "Message not sent."
+        }
+    }
+}
+
+private struct SendChatMessageEnvelope: Decodable {
+    let data: [SendChatMessageResult]
+}
+
+private struct SendChatMessageResult: Decodable {
+    let messageID: String?
+    let isSent: Bool?
+    let dropReason: DropReason?
+
+    private enum CodingKeys: String, CodingKey {
+        case messageID = "message_id"
+        case isSent = "is_sent"
+        case dropReason = "drop_reason"
+    }
+
+    struct DropReason: Decodable {
+        let code: String?
+        let message: String?
     }
 }
 

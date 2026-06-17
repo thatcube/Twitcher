@@ -37,6 +37,7 @@ struct VideoSurface: UIViewControllerRepresentable {
 /// Controls auto-hide and are revealed by pressing the remote.
 struct PlayerView: View {
   let channel: String
+  var auth: TwitchAuthSession
 
   @Environment(\.dismiss) private var dismiss
   @AppStorage("preferredQuality") private var preferredQuality = "Auto"
@@ -62,6 +63,8 @@ struct PlayerView: View {
   @State private var channelDisplayName: String = ""
   @State private var channelAvatarURL: URL?
   @State private var chatDraft: String = ""
+  @State private var isSendingChat = false
+  @State private var chatSendError: String?
   @State private var hideTask: Task<Void, Never>?
   @State private var focusRecoveryTask: Task<Void, Never>?
   @State private var latencyTask: Task<Void, Never>?
@@ -108,6 +111,7 @@ struct PlayerView: View {
   @FocusState private var focus: Focusable?
   private enum Focusable: Hashable {
     case video, streamInfo, quality, captions, chatToggle, chatInput, errorBack
+    case chatSend
     case chatSettingsButton
     case qualityOption(Int)
     case captionsOption(Int)
@@ -627,26 +631,86 @@ struct PlayerView: View {
   }
 
   private var chatComposerBar: some View {
-    HStack(spacing: 10) {
-      TextField("Send a message", text: $chatDraft)
-        .textFieldStyle(.plain)
-        .focused($focus, equals: .chatInput)
-        .onMoveCommand { direction in
-          switch direction {
-          case .left:
-            revealControls(preferredFocus: .chatToggle)
-          case .up:
-            focus = .chatSettingsButton
-          case .right:
-            focus = .chatInput
-          default:
-            break
+    VStack(alignment: .leading, spacing: 8) {
+      if let chatSendError {
+        Text(chatSendError)
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .lineLimit(2)
+      }
+
+      if auth.isAuthenticated {
+        HStack(spacing: 12) {
+          TextField("Send a message", text: $chatDraft)
+            .textFieldStyle(.plain)
+            .focused($focus, equals: .chatInput)
+            .onSubmit { submitChatMessage() }
+            .onMoveCommand { direction in
+              switch direction {
+              case .left:
+                revealControls(preferredFocus: .chatToggle)
+              case .up:
+                focus = .chatSettingsButton
+              case .right:
+                focus = .chatSend
+              default:
+                break
+              }
+            }
+
+          Button {
+            submitChatMessage()
+          } label: {
+            if isSendingChat {
+              ProgressView()
+                .frame(width: 24, height: 24)
+            } else {
+              Image(systemName: "paperplane.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .frame(width: 24, height: 24)
+            }
+          }
+          .buttonStyle(.bordered)
+          .disabled(isSendingChat || chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          .focused($focus, equals: .chatSend)
+          .onMoveCommand { direction in
+            switch direction {
+            case .left:
+              focus = .chatInput
+            case .up:
+              focus = .chatSettingsButton
+            default:
+              break
+            }
           }
         }
+      } else {
+        Text("Sign in to send messages")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 12)
     .background(Color(white: 0.07).opacity(0.98))
+  }
+
+  private func submitChatMessage() {
+    let text = chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty, !isSendingChat else { return }
+
+    isSendingChat = true
+    chatSendError = nil
+    Task {
+      do {
+        try await auth.sendChatMessage(text, toChannel: channel)
+        chatDraft = ""
+      } catch {
+        chatSendError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+      }
+      isSendingChat = false
+    }
   }
 
   // MARK: - Quality picker

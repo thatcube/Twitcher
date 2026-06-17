@@ -67,7 +67,7 @@ struct HomeView: View {
       }
     }
     .fullScreenCover(item: $selectedChannel) { channel in
-      PlayerView(channel: channel.login)
+      PlayerView(channel: channel.login, auth: auth)
     }
     .fullScreenCover(isPresented: $showAccount) {
       SignInView(auth: auth) {
