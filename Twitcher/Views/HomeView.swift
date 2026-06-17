@@ -114,6 +114,7 @@ struct HomeView: View {
             }
             .buttonStyle(.plain)
             .focused($focusedChannelID, equals: channel.id)
+            .zIndex(focusedChannelID == channel.id ? 1 : 0)
           }
         }
         .padding(.horizontal, 18)
