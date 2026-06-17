@@ -348,13 +348,22 @@ final class ChatService {
 
         continuationToken = pollResult.continuation ?? continuationToken
         let freshMessages = filterAndRememberYouTubeMessages(pollResult.entries)
-        if !freshMessages.isEmpty {
-          enqueue(freshMessages)
-        }
 
         let delay = pollResult.timeoutMs ?? youtubePollFallbackDelayMs
         let clampedDelay = max(youtubePollMinDelayMs, delay)
-        try? await Task.sleep(for: .milliseconds(Int(clampedDelay)))
+
+        if freshMessages.count > 1 {
+          // Trickle messages evenly across the polling interval so they arrive
+          // one-by-one rather than all at once.
+          let perMs = clampedDelay / UInt64(freshMessages.count)
+          for msg in freshMessages {
+            enqueue([msg])
+            try? await Task.sleep(for: .milliseconds(Int(perMs)))
+          }
+        } else {
+          if !freshMessages.isEmpty { enqueue(freshMessages) }
+          try? await Task.sleep(for: .milliseconds(Int(clampedDelay)))
+        }
       } catch {
         if Task.isCancelled { break }
         youtubeStatusMessage = "YouTube chat unavailable right now."
