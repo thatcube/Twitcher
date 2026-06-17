@@ -827,7 +827,7 @@ struct PlayerView: View {
           .textCase(.uppercase)
 
         settingsPill(
-          title: chatSyncToStream ? "Synced to Stream" : "Sync to Stream",
+          title: chatSyncToStream ? "Synced to Stream Delay" : "Match Stream Delay",
           isSelected: chatSyncToStream,
           focusTag: .chatSyncToggle
         ) {
@@ -1155,7 +1155,7 @@ struct PlayerView: View {
   /// reaches the delayed video. Show a short progress countdown so the user
   /// knows it was sent and roughly when it will surface.
   private func beginChatSyncSendIndicatorIfNeeded() {
-    guard chatSyncToStream, let delay = measuredLatencySeconds, delay >= 0.75 else {
+    guard chatSyncToStream, let delay = chatSyncDelaySeconds, delay >= 0.75 else {
       return
     }
     chatSyncSendClearTask?.cancel()
@@ -1407,12 +1407,23 @@ struct PlayerView: View {
     )
   }
 
+  /// The delay to hold chat by so it lines up with the on-screen video.
+  ///
+  /// This must be the *broadcast* (glass-to-glass) latency, i.e. how far behind
+  /// real time the picture is — which is exactly what the wall-clock estimate
+  /// (`now − EXT-X-PROGRAM-DATE-TIME`) measures. The live-edge value is only the
+  /// small in-buffer gap to the playlist edge (a few seconds) and would leave
+  /// chat running far ahead, so it's not used for syncing.
+  private var chatSyncDelaySeconds: Double? {
+    wallClockLatencySeconds
+  }
+
   /// Push the current sync preference + measured latency into the chat service.
   /// Called when the toggle changes and on each latency sample.
   private func applyChatSyncSettings() {
     chat.configureChatSync(
       enabled: chatSyncToStream,
-      delaySeconds: measuredLatencySeconds ?? 0
+      delaySeconds: chatSyncDelaySeconds ?? 0
     )
   }
 
@@ -1421,7 +1432,7 @@ struct PlayerView: View {
     guard chatSyncToStream else {
       return "Chat shows in real time, so it runs ahead of the delayed video."
     }
-    if let seconds = measuredLatencySeconds, seconds >= 0.75 {
+    if let seconds = chatSyncDelaySeconds, seconds >= 0.75 {
       return "Holding chat ~\(formatLatencySeconds(seconds)) to match the video."
     }
     return "Measuring stream delay… chat will sync once latency is known."
