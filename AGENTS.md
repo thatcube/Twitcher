@@ -18,10 +18,12 @@ this first:
 
 1. Stay on the worktree's existing feature branch — do not create additional
    branches or switch branches.
-2. Commit and push to that feature branch.
-3. To get changes onto `main`, merge the feature branch into `main` (a pull
-   request is fine, or push the merge directly to the `main` ref). Do not check
-   out `main` inside the worktree and do not edit the primary `main` checkout.
+2. Commit and push to that feature branch as you work.
+3. When the feature is finished and verified (builds, deploys, behaves as
+   expected), merge the feature branch directly into `main` by pushing the merge
+   to the `main` ref. Do **not** open a pull request. Do not check out `main`
+   inside the worktree and do not edit the primary `main` checkout.
+4. Ask the user for confirmation before doing the merge into `main`.
 
 ### When working directly on `main` (single-branch behavior)
 
@@ -72,10 +74,11 @@ Required completion rule:
 
 When the user asks to push, include all requested modified files in one commit, push to the current branch, then deploy to Apple TV and report the commit hash.
 
-When the user asks to merge into `main`:
-- In a **worktree**, merge the feature branch into `main` (PR or a direct push
-  to the `main` ref) without switching the worktree's branch or touching the
-  primary `main` checkout.
+When the user asks to merge into `main` (or the feature is otherwise complete):
+- In a **worktree**, merge the feature branch directly into `main` by pushing
+  the merge to the `main` ref. Do not open a pull request. Confirm with the user
+  before merging, and do not switch the worktree's branch or touch the primary
+  `main` checkout.
 - On a **direct `main` checkout**, the work is already on `main` once pushed.
 
 ## Completion checklist (do not skip)
