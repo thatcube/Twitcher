@@ -1786,19 +1786,30 @@ private struct ChatSettingsPillButtonStyle: ButtonStyle {
 private struct ChatInputShellStyle: ViewModifier {
   let isFocused: Bool
 
-  private var shape: RoundedRectangle {
-    RoundedRectangle(cornerRadius: 16, style: .continuous)
+  private var shape: Capsule {
+    Capsule(style: .continuous)
   }
 
+  @ViewBuilder
   func body(content: Content) -> some View {
-    content
-      .padding(.horizontal, 16)
-      .background(.ultraThinMaterial, in: shape)
-      .overlay(
-        shape
-          .stroke(.white.opacity(isFocused ? 0.72 : 0.24), lineWidth: 1)
-      )
-      .shadow(color: .black.opacity(isFocused ? 0.24 : 0.14), radius: isFocused ? 10 : 6, x: 0, y: 3)
+    if #available(tvOS 26.0, *) {
+      content
+        .padding(.horizontal, 16)
+        .clipShape(shape)
+        .glassEffect(.regular, in: shape)
+        .overlay(
+          shape
+            .strokeBorder(.white.opacity(isFocused ? 0.36 : 0.22), lineWidth: 1)
+        )
+    } else {
+      content
+        .padding(.horizontal, 16)
+        .background(.ultraThinMaterial, in: shape)
+        .overlay(
+          shape
+            .strokeBorder(.white.opacity(isFocused ? 0.36 : 0.22), lineWidth: 1)
+        )
+    }
   }
 }
 
