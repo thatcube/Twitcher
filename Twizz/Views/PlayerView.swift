@@ -630,19 +630,8 @@ struct PlayerView: View {
         Image(systemName: showChatSettings ? "xmark" : "slider.horizontal.3")
           .font(.system(size: 22, weight: .semibold))
           .frame(width: 30, height: 30)
-          .foregroundStyle(.white)
-          .padding(8)
-          .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-              .fill(.white.opacity(focus == .chatSettingsButton ? 0.20 : 0.08))
-          )
-          .overlay(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-              .stroke(.white.opacity(focus == .chatSettingsButton ? 0.62 : 0.18), lineWidth: 1)
-          )
       }
-      .buttonStyle(.plain)
-      .focusEffectDisabled()
+      .TwizzControlButtonStyle()
       .focused($focus, equals: .chatSettingsButton)
       .onMoveCommand { direction in
         if direction == .down, showChatSettings {
@@ -844,7 +833,7 @@ struct PlayerView: View {
   ) -> some View {
     let isFocused = focus == focusTag
 
-    return Button(action: action) {
+    return HStack(spacing: 8) {
       HStack(spacing: 8) {
         if isSelected {
           Image(systemName: "checkmark")
@@ -878,9 +867,11 @@ struct PlayerView: View {
           )
       )
     }
-    .buttonStyle(.plain)
-    .focusEffectDisabled()
+      .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+      .onTapGesture(perform: action)
+      .focusable()
     .focused($focus, equals: focusTag)
+      .accessibilityAddTraits(.isButton)
   }
 
   private func toggleChatSettings() {
