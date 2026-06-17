@@ -34,7 +34,8 @@ struct HomeView: View {
     themeManager.theme.palette(systemColorScheme: systemColorScheme)
   }
 
-  private enum TopTab: String, CaseIterable, Identifiable {
+  // Removed private so it can be accessed by the custom components below
+  enum TopTab: String, CaseIterable, Identifiable {
     case home = "Home"
     case browse = "Browse"
     case settings = "Settings"
@@ -49,37 +50,40 @@ struct HomeView: View {
   }
 
   var body: some View {
-    TabView(selection: $selectedTopTab) {
-      tabContainer { homeTab }
-        .tabItem { Text("Home") }
-        .tag(TopTab.home)
-        .toolbar(.visible, for: .tabBar)
-
-      tabContainer {
-        BrowseView(
-          auth: auth,
-          selectedChannel: $selectedChannel,
-          pendingCategory: $pendingBrowseCategory
-        )
-      }
-      .tabItem { Text("Browse") }
-      .tag(TopTab.browse)
-      .toolbar(.visible, for: .tabBar)
-
-      SettingsView(
-        themeManager: themeManager,
-        auth: auth,
-        onRequestSignIn: { showSignIn = true },
-        onAccountChanged: {
-          Task {
-            await refreshFollowedChannelsIfNeeded(force: true)
-            requestFocusIfPossible(force: true)
+    ZStack(alignment: .top) {
+      // 1) The active tab content (scrolls underneath the header)
+      Group {
+        switch selectedTopTab {
+        case .home:
+          tabContainer { homeTab }
+        case .browse:
+          tabContainer {
+            BrowseView(
+              auth: auth,
+              selectedChannel: $selectedChannel,
+              pendingCategory: $pendingBrowseCategory
+            )
+          }
+        case .settings:
+          tabContainer {
+            SettingsView(
+              themeManager: themeManager,
+              auth: auth,
+              onRequestSignIn: { showSignIn = true },
+              onAccountChanged: {
+                Task {
+                  await refreshFollowedChannelsIfNeeded(force: true)
+                  requestFocusIfPossible(force: true)
+                }
+              }
+            )
           }
         }
-      )
-      .tabItem { Text("Settings") }
-      .tag(TopTab.settings)
-      .toolbar(.visible, for: .tabBar)
+      }
+
+      // 2) A completely detached, fixed custom tab bar matched perfectly to tvOS 18 native style
+      CustomTopTabBar(selection: $selectedTopTab)
+        .zIndex(100)
     }
     .background(
       LinearGradient(
@@ -607,4 +611,82 @@ private struct HomeCategoryCard: View {
 
 #Preview {
   HomeView(deepLinkRouter: DeepLinkRouter())
+}
+
+// MARK: - Custom Fixed Tab Bar
+
+private struct CustomTopTabBar: View {
+    @Binding var selection: HomeView.TopTab
+    @Namespace private var focusNamespace
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(HomeView.TopTab.allCases) { tab in
+                CustomTopTabBarButton(
+                    tab: tab,
+                    selection: $selection,
+                    namespace: focusNamespace
+                )
+            }
+        }
+        .padding(8)
+        .background(.ultraThickMaterial, in: Capsule())
+        .padding(.top, 40)
+    }
+}
+
+private struct CustomTopTabBarButton: View {
+    let tab: HomeView.TopTab
+    @Binding var selection: HomeView.TopTab
+    let namespace: Namespace.ID
+    
+    @FocusState private var isFocused: Bool
+    @Environment(\.colorScheme) private var scheme
+    
+    var isSelected: Bool { selection == tab }
+    
+    var body: some View {
+        Button(action: {
+            selection = tab
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: iconName(for: tab))
+                    .font(.body.weight(isSelected ? .semibold : .medium))
+                
+                // Only show text if selected or focused, closely matching tvOS dynamic styles
+                if isSelected || isFocused {
+                    Text(tab.rawValue)
+                        .font(.callout.weight(isSelected ? .semibold : .medium))
+                        .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .foregroundStyle(isFocused ? Color.black : (isSelected ? Color.primary : Color.secondary))
+            .background {
+                if isFocused {
+                    Capsule()
+                        .fill(Color.white)
+                        .shadow(color: Color.black.opacity(0.15), radius: 8, y: 4)
+                        .matchedGeometryEffect(id: "focusRing", in: namespace)
+                } else if isSelected {
+                    Capsule()
+                        .fill(Color.primary.opacity(0.15))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .scaleEffect(isFocused ? 1.05 : 1.0)
+        .animation(.interactiveSpring(response: 0.4, dampingFraction: 0.7, blendDuration: 0.2), value: isFocused)
+        .animation(.easeOut(duration: 0.2), value: isSelected)
+    }
+    
+    func iconName(for tab: HomeView.TopTab) -> String {
+        switch tab {
+        case .home: return isSelected ? "house.fill" : "house"
+        case .browse: return isSelected ? "square.grid.2x2.fill" : "square.grid.2x2"
+        case .settings: return isSelected ? "gearshape.fill" : "gearshape"
+        }
+    }
 }
