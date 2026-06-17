@@ -217,15 +217,18 @@ struct HomeView: View {
             let itemID = "following-\(channel.id)"
             let isFocused = focusedItemID == itemID
 
-            FollowedChannelCard(
+            StreamChannelCard(
               channel: channel,
               isFocused: isFocused,
-              mediaWidth: rail.mediaWidth,
-              mediaHeight: rail.mediaHeight,
-              focusHorizontalInset: focusHorizontalInset,
-              focusVerticalInset: focusVerticalInset,
-              cardCornerRadius: cardCornerRadius,
-              mediaCornerRadius: mediaCornerRadius
+              layout: .rail(
+                mediaWidth: rail.mediaWidth,
+                mediaHeight: rail.mediaHeight,
+                focusHorizontalInset: focusHorizontalInset,
+                focusVerticalInset: focusVerticalInset,
+                cardCornerRadius: cardCornerRadius,
+                mediaCornerRadius: mediaCornerRadius
+              ),
+              showsGameName: true
             )
             .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
             .focusable(true)
@@ -277,15 +280,18 @@ struct HomeView: View {
               let itemID = "recommended-\(channel.id)"
               let isFocused = focusedItemID == itemID
 
-              FollowedChannelCard(
+              StreamChannelCard(
                 channel: channel,
                 isFocused: isFocused,
-                mediaWidth: rail.mediaWidth,
-                mediaHeight: rail.mediaHeight,
-                focusHorizontalInset: focusHorizontalInset,
-                focusVerticalInset: focusVerticalInset,
-                cardCornerRadius: cardCornerRadius,
-                mediaCornerRadius: mediaCornerRadius
+                layout: .rail(
+                  mediaWidth: rail.mediaWidth,
+                  mediaHeight: rail.mediaHeight,
+                  focusHorizontalInset: focusHorizontalInset,
+                  focusVerticalInset: focusVerticalInset,
+                  cardCornerRadius: cardCornerRadius,
+                  mediaCornerRadius: mediaCornerRadius
+                ),
+                showsGameName: true
               )
               .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
               .focusable(true)
@@ -489,81 +495,6 @@ struct HomeView: View {
     guard !recommendations.isLoading else { return false }
     guard let lastUpdatedAt = recommendations.lastUpdatedAt else { return true }
     return Date().timeIntervalSince(lastUpdatedAt) >= autoRefreshStaleInterval
-  }
-}
-
-private struct FollowedChannelCard: View {
-  let channel: FollowedChannel
-  let isFocused: Bool
-  let mediaWidth: CGFloat
-  let mediaHeight: CGFloat
-  let focusHorizontalInset: CGFloat
-  let focusVerticalInset: CGFloat
-  let cardCornerRadius: CGFloat
-  let mediaCornerRadius: CGFloat
-
-  @Environment(\.themePalette) private var palette
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      ZStack(alignment: .bottomLeading) {
-        AsyncImage(url: channel.thumbnailURL) { image in
-          image
-            .resizable()
-            .scaledToFill()
-        } placeholder: {
-          Color.primary.opacity(0.08)
-        }
-        .frame(width: mediaWidth, height: mediaHeight)
-        .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
-
-        LinearGradient(
-          colors: [Color.clear, Color.black.opacity(0.82)],
-          startPoint: .top,
-          endPoint: .bottom
-        )
-        .frame(width: mediaWidth, height: mediaHeight)
-        .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
-
-        HStack(spacing: 8) {
-          Circle()
-            .fill(channel.isLive ? Color.red : Color.gray)
-            .frame(width: 8, height: 8)
-          if let viewerCount = channel.viewerCount {
-            Text("\(viewerCount) watching")
-              .font(.caption2)
-              .foregroundStyle(Color.white.opacity(0.78))
-          }
-        }
-        .padding(12)
-      }
-      .frame(width: mediaWidth, alignment: .leading)
-
-      Text(channel.displayName)
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
-        .lineLimit(1)
-
-      Text(channel.title.isEmpty ? "No title" : channel.title)
-        .font(.footnote)
-        .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
-        .lineLimit(2)
-        .frame(height: 38, alignment: .topLeading)
-
-      Text(channel.gameName)
-        .font(.caption2)
-        .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
-        .lineLimit(1)
-    }
-    .padding(.horizontal, focusHorizontalInset)
-    .padding(.vertical, focusVerticalInset)
-    .frame(width: mediaWidth + (focusHorizontalInset * 2), alignment: .leading)
-    .background {
-      RoundedRectangle(cornerRadius: cardCornerRadius)
-        .fill(isFocused ? palette.liftSurface : Color.clear)
-    }
-    .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
-    .shadow(color: Color.black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
   }
 }
 
