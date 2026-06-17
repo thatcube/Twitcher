@@ -147,7 +147,9 @@ struct RichChatLineView: View {
     }
 
     private var segments: [Segment] {
-        let punctuation = CharacterSet(charactersIn: "()[]{}<>.,!?;:\"'`")
+        // Keep ':' out of punctuation so tokens like :eyes: or :_raeKEK:
+        // survive tokenization and can match YouTube emote shortcuts.
+        let punctuation = CharacterSet(charactersIn: "()[]{}<>.,!?;\"'`")
         let words = message.text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
         var output: [Segment] = []
 
