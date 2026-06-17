@@ -4,7 +4,6 @@ struct HomeView: View {
   let deepLinkRouter: DeepLinkRouter
 
   private let channelRailVerticalPadding: CGFloat = 20
-  private let targetVisibleCards: CGFloat = 4
   private let peekCardFraction: CGFloat = 0.15
   private let focusHorizontalInset: CGFloat = 18
   private let focusVerticalInset: CGFloat = 18
@@ -15,7 +14,7 @@ struct HomeView: View {
   private let focusedCardScale: CGFloat = 1.07
   private let autoRefreshStaleInterval: TimeInterval = 5 * 60
 
-  @State private var selectedTopTab: TopTab = .home
+  @State private var selectedSidebarTab: SidebarTab = .home
   @State private var auth = TwitchAuthSession()
   @State private var follows = FollowedChannelsService()
   @State private var recommendations = RecommendationsService()
@@ -24,6 +23,8 @@ struct HomeView: View {
   @State private var pendingBrowseCategory: TwitchCategory?
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
+
+  @AppStorage(StreamCardSize.storageKey) private var streamCardSizeRaw = StreamCardSize.fallback.rawValue
 
   @Environment(\.colorScheme) private var systemColorScheme
   @FocusState private var focusedItemID: String?
@@ -34,13 +35,28 @@ struct HomeView: View {
     themeManager.theme.palette(systemColorScheme: systemColorScheme)
   }
 
-  // Removed private so it can be accessed by the custom components below
-  enum TopTab: String, CaseIterable, Identifiable {
+  private var streamCardSize: StreamCardSize {
+    StreamCardSize.resolve(streamCardSizeRaw)
+  }
+
+  private var targetVisibleCards: CGFloat {
+    CGFloat(streamCardSize.visibleCardCount)
+  }
+
+  enum SidebarTab: String, CaseIterable, Identifiable {
     case home = "Home"
     case browse = "Browse"
     case settings = "Settings"
 
     var id: String { rawValue }
+
+    var systemImage: String {
+      switch self {
+      case .home: return "house"
+      case .browse: return "square.grid.2x2"
+      case .settings: return "gearshape"
+      }
+    }
   }
 
   private struct ChannelRailMetrics {
@@ -50,41 +66,44 @@ struct HomeView: View {
   }
 
   var body: some View {
-    ZStack(alignment: .top) {
-      // 1) The active tab content (scrolls underneath the header)
-      Group {
-        switch selectedTopTab {
-        case .home:
-          tabContainer { homeTab }
-        case .browse:
-          tabContainer {
-            BrowseView(
-              auth: auth,
-              selectedChannel: $selectedChannel,
-              pendingCategory: $pendingBrowseCategory
-            )
-          }
-        case .settings:
-          tabContainer {
-            SettingsView(
-              themeManager: themeManager,
-              auth: auth,
-              onRequestSignIn: { showSignIn = true },
-              onAccountChanged: {
-                Task {
-                  await refreshFollowedChannelsIfNeeded(force: true)
-                  requestFocusIfPossible(force: true)
-                }
-              }
-            )
-          }
+    TabView(selection: $selectedSidebarTab) {
+      tabContainer { homeTab }
+        .tag(SidebarTab.home)
+        .tabItem {
+          Label(SidebarTab.home.rawValue, systemImage: SidebarTab.home.systemImage)
         }
+
+      tabContainer {
+        BrowseView(
+          auth: auth,
+          selectedChannel: $selectedChannel,
+          pendingCategory: $pendingBrowseCategory
+        )
+      }
+      .tag(SidebarTab.browse)
+      .tabItem {
+        Label(SidebarTab.browse.rawValue, systemImage: SidebarTab.browse.systemImage)
       }
 
-      // 2) A completely detached, fixed custom tab bar matched perfectly to tvOS 18 native style
-      CustomTopTabBar(selection: $selectedTopTab)
-        .zIndex(100)
+      tabContainer {
+        SettingsView(
+          themeManager: themeManager,
+          auth: auth,
+          onRequestSignIn: { showSignIn = true },
+          onAccountChanged: {
+            Task {
+              await refreshFollowedChannelsIfNeeded(force: true)
+              requestFocusIfPossible(force: true)
+            }
+          }
+        )
+      }
+      .tag(SidebarTab.settings)
+      .tabItem {
+        Label(SidebarTab.settings.rawValue, systemImage: SidebarTab.settings.systemImage)
+      }
     }
+    .tabViewStyle(.sidebarAdaptable)
     .background(
       LinearGradient(
         colors: resolvedPalette.backgroundColors,
@@ -112,7 +131,7 @@ struct HomeView: View {
         requestFocusIfPossible(force: true)
       }
     }
-    .onChange(of: selectedTopTab) { _, tab in
+    .onChange(of: selectedSidebarTab) { _, tab in
       guard tab == .home else { return }
       Task {
         await refreshFollowedChannelsIfNeeded(force: false)
@@ -136,7 +155,6 @@ struct HomeView: View {
       .environment(\.themePalette, resolvedPalette)
       .preferredColorScheme(themeManager.theme.preferredColorScheme)
     }
-    .toolbar(.visible, for: .tabBar)
   }
 
   @ViewBuilder
@@ -194,6 +212,8 @@ struct HomeView: View {
             requestFocusIfPossible(force: true)
           }
         }
+
+        streamCardSettingsMenu
       }
 
       if let errorMessage = follows.errorMessage {
@@ -208,15 +228,18 @@ struct HomeView: View {
             let itemID = "following-\(channel.id)"
             let isFocused = focusedItemID == itemID
 
-            FollowedChannelCard(
+            StreamChannelCard(
               channel: channel,
               isFocused: isFocused,
-              mediaWidth: rail.mediaWidth,
-              mediaHeight: rail.mediaHeight,
-              focusHorizontalInset: focusHorizontalInset,
-              focusVerticalInset: focusVerticalInset,
-              cardCornerRadius: cardCornerRadius,
-              mediaCornerRadius: mediaCornerRadius
+              layout: .rail(
+                mediaWidth: rail.mediaWidth,
+                mediaHeight: rail.mediaHeight,
+                focusHorizontalInset: focusHorizontalInset,
+                focusVerticalInset: focusVerticalInset,
+                cardCornerRadius: cardCornerRadius,
+                mediaCornerRadius: mediaCornerRadius
+              ),
+              showsGameName: true
             )
             .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
             .focusable(true)
@@ -268,15 +291,18 @@ struct HomeView: View {
               let itemID = "recommended-\(channel.id)"
               let isFocused = focusedItemID == itemID
 
-              FollowedChannelCard(
+              StreamChannelCard(
                 channel: channel,
                 isFocused: isFocused,
-                mediaWidth: rail.mediaWidth,
-                mediaHeight: rail.mediaHeight,
-                focusHorizontalInset: focusHorizontalInset,
-                focusVerticalInset: focusVerticalInset,
-                cardCornerRadius: cardCornerRadius,
-                mediaCornerRadius: mediaCornerRadius
+                layout: .rail(
+                  mediaWidth: rail.mediaWidth,
+                  mediaHeight: rail.mediaHeight,
+                  focusHorizontalInset: focusHorizontalInset,
+                  focusVerticalInset: focusVerticalInset,
+                  cardCornerRadius: cardCornerRadius,
+                  mediaCornerRadius: mediaCornerRadius
+                ),
+                showsGameName: true
               )
               .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
               .focusable(true)
@@ -325,7 +351,7 @@ struct HomeView: View {
               .focusEffectDisabled()
               .onTapGesture {
                 pendingBrowseCategory = category
-                selectedTopTab = .browse
+                selectedSidebarTab = .browse
               }
               .accessibilityAddTraits(.isButton)
               .scaleEffect(isFocused ? focusedCardScale : 1)
@@ -339,6 +365,22 @@ struct HomeView: View {
       }
       .focusSection()
     }
+  }
+
+  private var streamCardSettingsMenu: some View {
+    Menu {
+      Picker("Card Size", selection: $streamCardSizeRaw) {
+        ForEach(StreamCardSize.allCases) { size in
+          Label("\(size.title) · \(size.subtitle)", systemImage: size.symbolName)
+            .tag(size.rawValue)
+        }
+      }
+      // Future: a "Search" entry point can be added here as another menu item.
+    } label: {
+      Image(systemName: "slider.horizontal.3")
+        .font(.headline)
+    }
+    .accessibilityLabel("View settings")
   }
 
   private func channelRailMetrics(for availableWidth: CGFloat) -> ChannelRailMetrics {
@@ -483,81 +525,6 @@ struct HomeView: View {
   }
 }
 
-private struct FollowedChannelCard: View {
-  let channel: FollowedChannel
-  let isFocused: Bool
-  let mediaWidth: CGFloat
-  let mediaHeight: CGFloat
-  let focusHorizontalInset: CGFloat
-  let focusVerticalInset: CGFloat
-  let cardCornerRadius: CGFloat
-  let mediaCornerRadius: CGFloat
-
-  @Environment(\.themePalette) private var palette
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      ZStack(alignment: .bottomLeading) {
-        AsyncImage(url: channel.thumbnailURL) { image in
-          image
-            .resizable()
-            .scaledToFill()
-        } placeholder: {
-          Color.primary.opacity(0.08)
-        }
-        .frame(width: mediaWidth, height: mediaHeight)
-        .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
-
-        LinearGradient(
-          colors: [Color.clear, Color.black.opacity(0.82)],
-          startPoint: .top,
-          endPoint: .bottom
-        )
-        .frame(width: mediaWidth, height: mediaHeight)
-        .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
-
-        HStack(spacing: 8) {
-          Circle()
-            .fill(channel.isLive ? Color.red : Color.gray)
-            .frame(width: 8, height: 8)
-          if let viewerCount = channel.viewerCount {
-            Text("\(viewerCount) watching")
-              .font(.caption2)
-              .foregroundStyle(Color.white.opacity(0.78))
-          }
-        }
-        .padding(12)
-      }
-      .frame(width: mediaWidth, alignment: .leading)
-
-      Text(channel.displayName)
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(isFocused ? palette.liftPrimaryText : Color.primary)
-        .lineLimit(1)
-
-      Text(channel.title.isEmpty ? "No title" : channel.title)
-        .font(.footnote)
-        .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
-        .lineLimit(2)
-        .frame(height: 38, alignment: .topLeading)
-
-      Text(channel.gameName)
-        .font(.caption2)
-        .foregroundStyle(isFocused ? palette.liftSecondaryText : Color.secondary)
-        .lineLimit(1)
-    }
-    .padding(.horizontal, focusHorizontalInset)
-    .padding(.vertical, focusVerticalInset)
-    .frame(width: mediaWidth + (focusHorizontalInset * 2), alignment: .leading)
-    .background {
-      RoundedRectangle(cornerRadius: cardCornerRadius)
-        .fill(isFocused ? palette.liftSurface : Color.clear)
-    }
-    .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
-    .shadow(color: Color.black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
-  }
-}
-
 private struct HomeCategoryCard: View {
   let category: TwitchCategory
   let isFocused: Bool
@@ -611,83 +578,4 @@ private struct HomeCategoryCard: View {
 
 #Preview {
   HomeView(deepLinkRouter: DeepLinkRouter())
-}
-
-// MARK: - Custom Fixed Tab Bar
-
-private struct CustomTopTabBar: View {
-    @Binding var selection: HomeView.TopTab
-    @Namespace private var focusNamespace
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(HomeView.TopTab.allCases) { tab in
-                CustomTopTabBarButton(
-                    tab: tab,
-                    selection: $selection,
-                    namespace: focusNamespace
-                )
-            }
-        }
-        .padding(8)
-        .background(.regularMaterial, in: Capsule())
-        .shadow(color: .black.opacity(0.15), radius: 20, y: 10)
-        .padding(.top, 40)
-    }
-}
-
-private struct CustomTopTabBarButton: View {
-    let tab: HomeView.TopTab
-    @Binding var selection: HomeView.TopTab
-    let namespace: Namespace.ID
-    
-    @FocusState private var isFocused: Bool
-    @Environment(\.colorScheme) private var scheme
-    
-    var isSelected: Bool { selection == tab }
-    
-    var body: some View {
-        Button(action: {
-            selection = tab
-        }) {
-            HStack(spacing: 6) {
-                Image(systemName: iconName(for: tab))
-                    .font(.body.weight(isSelected ? .semibold : .medium))
-                
-                // Only show text if selected or focused, closely matching tvOS dynamic styles
-                if isSelected || isFocused {
-                    Text(tab.rawValue)
-                        .font(.callout.weight(isSelected ? .semibold : .medium))
-                        .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .foregroundStyle(isFocused ? Color.primary : (isSelected ? Color.primary : Color.secondary))
-            .background {
-                if isFocused {
-                    Capsule()
-                        .fill(Material.regularMaterial)
-                        .shadow(color: Color.black.opacity(0.1), radius: 8, y: 4)
-                        .matchedGeometryEffect(id: "focusRing", in: namespace)
-                } else if isSelected {
-                    Capsule()
-                        .fill(Color.primary.opacity(0.15))
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .focused($isFocused)
-        .scaleEffect(isFocused ? 1.02 : 1.0)
-        .animation(.interactiveSpring(response: 0.4, dampingFraction: 0.8, blendDuration: 0.2), value: isFocused)
-        .animation(.easeOut(duration: 0.2), value: isSelected)
-    }
-    
-    func iconName(for tab: HomeView.TopTab) -> String {
-        switch tab {
-        case .home: return isSelected ? "house.fill" : "house"
-        case .browse: return isSelected ? "square.grid.2x2.fill" : "square.grid.2x2"
-        case .settings: return isSelected ? "gearshape.fill" : "gearshape"
-        }
-    }
 }
