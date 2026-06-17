@@ -6,6 +6,7 @@ struct BrowseView: View {
     let auth: TwitchAuthSession
     @Binding var selectedChannel: FollowedChannel?
     @Binding var pendingCategory: TwitchCategory?
+    let onTopTabBarVisibilityChanged: (Bool) -> Void
 
     @State private var service = BrowseService()
     @State private var path: [TwitchCategory] = []
@@ -42,8 +43,17 @@ struct BrowseView: View {
                 }
             }
         }
-        .onAppear { consumePendingCategoryIfNeeded() }
+        .onAppear {
+            onTopTabBarVisibilityChanged(path.isEmpty)
+            consumePendingCategoryIfNeeded()
+        }
         .onChange(of: pendingCategory) { _, _ in consumePendingCategoryIfNeeded() }
+        .onChange(of: path) { _, newPath in
+            onTopTabBarVisibilityChanged(newPath.isEmpty)
+        }
+        .onDisappear {
+            onTopTabBarVisibilityChanged(true)
+        }
     }
 
     private func consumePendingCategoryIfNeeded() {
