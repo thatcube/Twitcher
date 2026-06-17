@@ -588,6 +588,7 @@ struct PlayerView: View {
 
   private var chatPane: some View {
     let isGlass = chatLayoutMode == .glass
+    let useLighterOverlayBackground = chatLayoutMode == .overlay
     return VStack(spacing: 0) {
       ChatView(
         channel: channel,
@@ -598,7 +599,8 @@ struct PlayerView: View {
         isConnected: chat.isConnected,
         emoteURLs: chat.emoteURLs,
         badgeURLs: chat.badgeURLs,
-        useGlassBackground: isGlass
+        useGlassBackground: isGlass,
+        useLighterOverlayBackground: useLighterOverlayBackground
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -974,7 +976,9 @@ struct PlayerView: View {
     .background(
       chatLayoutMode == .glass
         ? AnyShapeStyle(.clear)
-        : AnyShapeStyle(Color(white: 0.07).opacity(0.98))
+        : (chatLayoutMode == .overlay
+            ? AnyShapeStyle(Color(white: 0.13).opacity(0.92))
+            : AnyShapeStyle(Color(white: 0.07).opacity(0.98)))
     )
   }
 

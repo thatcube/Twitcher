@@ -14,6 +14,8 @@ struct ChatView: View {
     /// When true, the message list draws a light scrim instead of a solid
     /// background so an underlying Liquid Glass panel can show through.
     var useGlassBackground: Bool = false
+    /// When true, use a lighter non-glass background for overlay mode.
+    var useLighterOverlayBackground: Bool = false
     @State private var pendingScrollWork: DispatchWorkItem?
 
     private var messageSpacingValue: CGFloat {
@@ -44,7 +46,9 @@ struct ChatView: View {
         messageList
         .background(useGlassBackground
             ? AnyShapeStyle(Color.black.opacity(0.22))
-            : AnyShapeStyle(Color(white: 0.07).opacity(0.96)))
+            : (useLighterOverlayBackground
+                ? AnyShapeStyle(Color(white: 0.13).opacity(0.90))
+                : AnyShapeStyle(Color(white: 0.07).opacity(0.96))))
     }
 
     private var messageList: some View {
