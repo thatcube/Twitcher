@@ -4,7 +4,7 @@ struct HomeView: View {
   private let pagePadding: CGFloat = 52
   private let channelRailVerticalPadding: CGFloat = 20
   private let targetVisibleCards: CGFloat = 4
-  private let peekCardFraction: CGFloat = 0.3
+  private let peekCardFraction: CGFloat = 0.15
   private let focusHorizontalInset: CGFloat = 18
   private let focusVerticalInset: CGFloat = 18
   private let cardCornerRadius: CGFloat = 22
