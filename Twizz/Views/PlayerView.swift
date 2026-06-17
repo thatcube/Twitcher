@@ -938,30 +938,32 @@ struct PlayerView: View {
           Button {
             chatInputActivationToken &+= 1
           } label: {
-            ChatInputField(
-              text: $chatDraft,
-              placeholder: "Send a message",
-              isFocused: focus == .chatInput,
-              activationToken: chatInputActivationToken
-            )
-            .allowsHitTesting(false)
-            .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
-            .overlay(alignment: .leading) {
+            ZStack {
+              ChatInputField(
+                text: $chatDraft,
+                placeholder: "Send a message",
+                isFocused: focus == .chatInput,
+                activationToken: chatInputActivationToken
+              )
+              .allowsHitTesting(false)
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
               Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
                 .font(.callout)
-                .foregroundStyle(.white.opacity(chatDraft.isEmpty ? 0.45 : 1.0))
+                .foregroundStyle(focus == .chatInput
+                  ? (chatDraft.isEmpty ? Color.black.opacity(0.45) : Color.black)
+                  : .white.opacity(chatDraft.isEmpty ? 0.45 : 1.0))
                 .lineLimit(1)
                 .padding(.leading, 18)
                 .padding(.trailing, hasChatDraft ? 118 : 24)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // Match the send button feel: the input grows when focused.
             .frame(height: hasChatDraft ? chatInputFocusedHeight : (focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight))
             .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
-            // Reserve trailing text space only when the send button is visible.
             .padding(.trailing, hasChatDraft ? 108 : 0)
             .frame(maxWidth: .infinity)
+            .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
           }
           .buttonStyle(ChatInputButtonStyle())
           .focusEffectDisabled()
@@ -973,7 +975,7 @@ struct PlayerView: View {
             case .up:
               focus = .chatSettingsButton
             case .right:
-              if hasChatDraft { focus = .chatSend }
+              if hasChatDraft { focus = .chatSend } else { focus = .chatInput }
             default:
               break
             }
@@ -1017,15 +1019,15 @@ struct PlayerView: View {
           showSignInSheet = true
           scheduleHide()
         } label: {
-          ChatInputField(
-            text: .constant(""),
-            placeholder: "Sign in to send messages",
-            isFocused: focus == .chatInput,
-            allowsEditing: false
-          )
-          .allowsHitTesting(false)
-          .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
-          .overlay(alignment: .leading) {
+          ZStack {
+            ChatInputField(
+              text: .constant(""),
+              placeholder: "Sign in to send messages",
+              isFocused: focus == .chatInput,
+              allowsEditing: false
+            )
+            .allowsHitTesting(false)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             Text("Sign in to send messages")
               .font(.callout)
               .foregroundStyle(.white.opacity(0.45))
@@ -1034,11 +1036,12 @@ struct PlayerView: View {
               .padding(.trailing, 24)
               .allowsHitTesting(false)
               .accessibilityHidden(true)
+              .frame(maxWidth: .infinity, alignment: .leading)
           }
-          // Keep the signed-out prompt visually aligned with the active input.
           .frame(height: focus == .chatInput ? chatInputFocusedHeight : chatInputUnfocusedHeight)
           .animation(.easeOut(duration: 0.18), value: focus == .chatInput)
           .frame(maxWidth: .infinity)
+          .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
         }
         .buttonStyle(ChatInputButtonStyle())
         .focusEffectDisabled()
@@ -1837,24 +1840,39 @@ private struct ChatInputShellStyle: ViewModifier {
   @ViewBuilder
   func body(content: Content) -> some View {
     if #available(tvOS 26.0, *) {
-      content
-        .padding(.horizontal, 16)
-        .clipShape(shape)
-        .glassEffect(.regular, in: shape)
-        .scaleEffect(isFocused ? 1.03 : 1.0)
-        .shadow(color: .white.opacity(isFocused ? 0.20 : 0.06), radius: isFocused ? 14 : 6, x: 0, y: 0)
-        .shadow(color: .black.opacity(0.22), radius: 7, x: 0, y: 3)
+      if isFocused {
+        content
+          .background(.white, in: shape)
+          .scaleEffect(1.02)
+          .shadow(color: .white.opacity(0.25), radius: 12, x: 0, y: 0)
+          .shadow(color: .black.opacity(0.22), radius: 7, x: 0, y: 3)
+      } else {
+        content
+          .clipShape(shape)
+          .glassEffect(.regular, in: shape)
+          .shadow(color: .black.opacity(0.15), radius: 5, x: 0, y: 2)
+      }
     } else {
-      content
-        .padding(.horizontal, 16)
-        .background(.ultraThinMaterial, in: shape)
-        .overlay(
-          shape
-            .strokeBorder(.white.opacity(isFocused ? 0.18 : 0.08), lineWidth: isFocused ? 1.25 : 0.75)
-        )
-        .scaleEffect(isFocused ? 1.02 : 1.0)
+      if isFocused {
+        content
+          .background(.white, in: shape)
+          .scaleEffect(1.02)
+      } else {
+        content
+          .background(.ultraThinMaterial, in: shape)
+          .overlay(
+            shape.strokeBorder(.white.opacity(0.08), lineWidth: 0.75)
+          )
+      }
     }
   }
+}
+
+/// UITextField subclass that opts out of the tvOS focus engine so the platform
+/// focus halo is never drawn, while still allowing becomeFirstResponder() for
+/// keyboard input.
+private final class FocusHidingTextField: UITextField {
+  override var canBecomeFocused: Bool { false }
 }
 
 /// A fully custom chat input backed by a `UITextField` so we control the
@@ -1870,7 +1888,7 @@ private struct ChatInputField: UIViewRepresentable {
   var onActivate: (() -> Void)? = nil
 
   func makeUIView(context: Context) -> UITextField {
-    let field = UITextField()
+    let field = FocusHidingTextField()
     field.delegate = context.coordinator
     field.borderStyle = .none
     field.backgroundColor = .clear
@@ -1879,7 +1897,6 @@ private struct ChatInputField: UIViewRepresentable {
     field.font = .preferredFont(forTextStyle: .callout)
     field.contentVerticalAlignment = .center
     field.adjustsFontForContentSizeCategory = true
-    // Keep UIKit field unclipped for native tvOS focus visuals.
     field.attributedPlaceholder = NSAttributedString(
       string: placeholder,
       attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.45)]
@@ -1892,9 +1909,6 @@ private struct ChatInputField: UIViewRepresentable {
       for: .editingChanged
     )
     field.alpha = 0.001
-    // Prevent tvOS UIKit focus engine from visiting this hidden field
-    // and applying white/gray system focus styling to it.
-    field.isUserInteractionEnabled = false
     return field
   }
 
@@ -1913,12 +1927,6 @@ private struct ChatInputField: UIViewRepresentable {
       } else {
         onActivate?()
       }
-    }
-
-    if !isFocused, uiView.isFirstResponder {
-      // Do not resign here: tvOS moves SwiftUI focus to nil when its system
-      // keyboard overlay opens, which would immediately close the keyboard.
-      // Keyboard dismissal is handled explicitly on send and shouldReturn.
     }
 
     uiView.alpha = 0.001
