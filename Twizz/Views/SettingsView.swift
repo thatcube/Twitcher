@@ -9,7 +9,6 @@ struct SettingsView: View {
 
   @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
-  @FocusState private var focusedTheme: AppTheme?
 
   var body: some View {
     ZStack {
@@ -51,12 +50,10 @@ struct SettingsView: View {
           } label: {
             ThemeOptionCard(
               theme: theme,
-              isSelected: themeManager.theme == theme,
-              isFocused: focusedTheme == theme
+              isSelected: themeManager.theme == theme
             )
           }
           .buttonStyle(.card)
-          .focused($focusedTheme, equals: theme)
         }
       }
     }
@@ -154,7 +151,6 @@ struct SettingsView: View {
 private struct ThemeOptionCard: View {
   let theme: AppTheme
   let isSelected: Bool
-  let isFocused: Bool
 
   var body: some View {
     VStack(spacing: 16) {
@@ -170,10 +166,6 @@ private struct ThemeOptionCard: View {
         .foregroundStyle(isSelected ? Color.green : Color.secondary)
     }
     .frame(width: 200, height: 200)
-    .background(
-      RoundedRectangle(cornerRadius: 22)
-        .fill(isFocused ? Color.primary.opacity(0.18) : Color.primary.opacity(0.07))
-    )
     .overlay(
       RoundedRectangle(cornerRadius: 22)
         .stroke(isSelected ? Color.green : Color.clear, lineWidth: 3)
