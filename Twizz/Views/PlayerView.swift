@@ -588,7 +588,7 @@ struct PlayerView: View {
       }
     }
     .padding(28)
-    .frame(width: 640, alignment: .leading)
+    .fixedSize(horizontal: true, vertical: true)
     .background(Color(white: 0.12).opacity(0.98), in: RoundedRectangle(cornerRadius: 24))
     .focusSection()
   }
@@ -603,17 +603,16 @@ struct PlayerView: View {
       HStack(spacing: 8) {
         if isSelected {
           Image(systemName: "checkmark")
-            .font(.callout.weight(.semibold))
+            .font(.callout.weight(.bold))
         }
         Text(title)
-          .font(.callout)
+          .font(.callout.weight(isSelected ? .semibold : .regular))
           .fixedSize()
       }
       .padding(.horizontal, 22)
       .padding(.vertical, 12)
     }
     .buttonStyle(.bordered)
-    .tint(isSelected ? Color.accentColor : Color(white: 0.32))
     .focused($focus, equals: focusTag)
   }
 
