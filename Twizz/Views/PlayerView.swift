@@ -42,6 +42,7 @@ struct PlayerView: View {
   @Environment(\.dismiss) private var dismiss
   @AppStorage("preferredQuality") private var preferredQuality = "Auto"
   @AppStorage("chatTextSize") private var chatTextSizeRaw = ChatTextSizeOption.medium.rawValue
+  @AppStorage("chatLineHeight") private var chatLineHeightRaw = ChatLineHeightOption.normal.rawValue
   @AppStorage("chatLineSpacing") private var chatLineSpacingRaw = ChatLineSpacingOption.normal.rawValue
   @AppStorage("chatWidthMode") private var chatWidthModeRaw = ChatWidthMode.medium.rawValue
   @AppStorage("chatLayoutMode") private var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
@@ -123,6 +124,7 @@ struct PlayerView: View {
     case qualityOption(Int)
     case captionsOption(Int)
     case chatTextSizeOption(Int)
+    case chatLineHeightOption(Int)
     case chatLineSpacingOption(Int)
     case chatWidthOption(Int)
     case chatLayoutOption(Int)
@@ -132,6 +134,10 @@ struct PlayerView: View {
 
   private var chatTextSize: ChatTextSizeOption {
     ChatTextSizeOption(rawValue: chatTextSizeRaw) ?? .medium
+  }
+
+  private var chatLineHeight: ChatLineHeightOption {
+    ChatLineHeightOption(rawValue: chatLineHeightRaw) ?? .normal
   }
 
   private var chatLineSpacing: ChatLineSpacingOption {
@@ -556,7 +562,8 @@ struct PlayerView: View {
         channel: channel,
         messages: chat.messages,
         textSize: chatTextSize,
-        lineSpacing: chatLineSpacing,
+        messageSpacing: chatLineSpacing,
+        lineHeight: chatLineHeight,
         isConnected: chat.isConnected,
         emoteURLs: chat.emoteURLs,
         badgeURLs: chat.badgeURLs,
@@ -622,6 +629,25 @@ struct PlayerView: View {
               focusTag: .chatTextSizeOption(index)
             ) {
               chatTextSizeRaw = option.rawValue
+            }
+          }
+        }
+        .focusSection()
+      }
+
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Line Height")
+          .font(.headline)
+          .foregroundStyle(.white)
+
+        HStack(spacing: 14) {
+          ForEach(Array(ChatLineHeightOption.allCases.enumerated()), id: \.offset) { index, option in
+            settingsPill(
+              title: option.title,
+              isSelected: option == chatLineHeight,
+              focusTag: .chatLineHeightOption(index)
+            ) {
+              chatLineHeightRaw = option.rawValue
             }
           }
         }

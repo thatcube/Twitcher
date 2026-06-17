@@ -43,6 +43,20 @@ enum ChatLineSpacingOption: String, CaseIterable {
   }
 }
 
+enum ChatLineHeightOption: String, CaseIterable {
+  case tight
+  case normal
+  case relaxed
+
+  var title: String {
+    switch self {
+    case .tight: return "Tight"
+    case .normal: return "Normal"
+    case .relaxed: return "Relaxed"
+    }
+  }
+}
+
 /// User-adjustable width of the docked chat panel.
 enum ChatWidthMode: String, CaseIterable {
   case narrow

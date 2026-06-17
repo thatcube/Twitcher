@@ -7,7 +7,7 @@ struct RichChatLineView: View {
     let globalEmoteURLs: [String: URL]
     let badgeURLs: [String: URL]
     var textSize: ChatTextSizeOption = .medium
-    var lineSpacing: ChatLineSpacingOption = .normal
+    var lineHeight: ChatLineHeightOption = .normal
 
     private enum Segment: Hashable {
         case text(String)
@@ -71,7 +71,7 @@ struct RichChatLineView: View {
     }
 
     private var rowSpacing: CGFloat {
-        switch lineSpacing {
+        switch lineHeight {
         case .tight: return 2
         case .normal: return 4
         case .relaxed: return 6

@@ -6,7 +6,8 @@ struct ChatView: View {
     let channel: String
     let messages: [ChatMessage]
     var textSize: ChatTextSizeOption = .medium
-    var lineSpacing: ChatLineSpacingOption = .normal
+    var messageSpacing: ChatLineSpacingOption = .normal
+    var lineHeight: ChatLineHeightOption = .normal
     var isConnected: Bool = false
     var emoteURLs: [String: URL] = [:]
     var badgeURLs: [String: URL] = [:]
@@ -15,8 +16,8 @@ struct ChatView: View {
     var useGlassBackground: Bool = false
     @State private var pendingScrollWork: DispatchWorkItem?
 
-    private var messageSpacing: CGFloat {
-        switch lineSpacing {
+    private var messageSpacingValue: CGFloat {
+        switch messageSpacing {
         case .tight: return 6
         case .normal: return 10
         case .relaxed: return 14
@@ -32,7 +33,7 @@ struct ChatView: View {
     }
 
     private var verticalPadding: CGFloat {
-        switch lineSpacing {
+        switch messageSpacing {
         case .tight: return 12
         case .normal: return 16
         case .relaxed: return 18
@@ -49,7 +50,7 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: messageSpacing) {
+                LazyVStack(alignment: .leading, spacing: messageSpacingValue) {
                     ForEach(messages) { message in
                         line(for: message)
                             .id(message.id)
@@ -92,7 +93,7 @@ struct ChatView: View {
             globalEmoteURLs: emoteURLs,
             badgeURLs: badgeURLs,
             textSize: textSize,
-            lineSpacing: lineSpacing
+            lineHeight: lineHeight
         )
     }
 
