@@ -5,37 +5,37 @@ import SwiftUI
 struct ChatView: View {
     let channel: String
     let messages: [ChatMessage]
-    var readabilityMode: ChatReadabilityMode = .balanced
+    var textSize: ChatTextSizeOption = .medium
+    var lineSpacing: ChatLineSpacingOption = .normal
     var isConnected: Bool = false
     var emoteURLs: [String: URL] = [:]
     var badgeURLs: [String: URL] = [:]
-    var condensedMessagesCount: Int = 0
     /// When true, the message list draws a light scrim instead of a solid
     /// background so an underlying Liquid Glass panel can show through.
     var useGlassBackground: Bool = false
     @State private var pendingScrollWork: DispatchWorkItem?
 
-    private var lineSpacing: CGFloat {
-        switch readabilityMode {
-        case .comfortable: return 14
-        case .balanced: return 10
-        case .compact: return 6
+    private var messageSpacing: CGFloat {
+        switch lineSpacing {
+        case .tight: return 6
+        case .normal: return 10
+        case .relaxed: return 14
         }
     }
 
     private var horizontalPadding: CGFloat {
-        switch readabilityMode {
-        case .comfortable: return 28
-        case .balanced: return 24
-        case .compact: return 18
+        switch textSize {
+        case .small: return 18
+        case .medium: return 24
+        case .large: return 28
         }
     }
 
     private var verticalPadding: CGFloat {
-        switch readabilityMode {
-        case .comfortable: return 18
-        case .balanced: return 16
-        case .compact: return 12
+        switch lineSpacing {
+        case .tight: return 12
+        case .normal: return 16
+        case .relaxed: return 18
         }
     }
 
@@ -49,7 +49,7 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: lineSpacing) {
+                LazyVStack(alignment: .leading, spacing: messageSpacing) {
                     ForEach(messages) { message in
                         line(for: message)
                             .id(message.id)
@@ -80,21 +80,6 @@ struct ChatView: View {
                     Text(isConnected ? "Waiting for messages…" : "Connecting to chat…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                } else if condensedMessagesCount > 0 {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            Text("Condensed \(condensedMessagesCount)")
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(.black.opacity(0.45), in: Capsule())
-                                .foregroundStyle(.white.opacity(0.86))
-                        }
-                    }
-                    .padding(.trailing, 14)
-                    .padding(.bottom, 10)
                 }
             }
         }
@@ -106,7 +91,8 @@ struct ChatView: View {
             nameColor: color(for: message),
             globalEmoteURLs: emoteURLs,
             badgeURLs: badgeURLs,
-            readabilityMode: readabilityMode
+            textSize: textSize,
+            lineSpacing: lineSpacing
         )
     }
 

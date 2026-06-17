@@ -41,8 +41,8 @@ struct PlayerView: View {
 
   @Environment(\.dismiss) private var dismiss
   @AppStorage("preferredQuality") private var preferredQuality = "Auto"
-  @AppStorage("chatReadabilityMode") private var chatReadabilityModeRaw = ChatReadabilityMode
-    .balanced.rawValue
+  @AppStorage("chatTextSize") private var chatTextSizeRaw = ChatTextSizeOption.medium.rawValue
+  @AppStorage("chatLineSpacing") private var chatLineSpacingRaw = ChatLineSpacingOption.normal.rawValue
   @AppStorage("chatWidthMode") private var chatWidthModeRaw = ChatWidthMode.medium.rawValue
   @AppStorage("chatLayoutMode") private var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
   @AppStorage("experimentalYouTubeMergeEnabled") private var experimentalYouTubeMergeEnabled = false
@@ -122,15 +122,20 @@ struct PlayerView: View {
     case chatSettingsButton
     case qualityOption(Int)
     case captionsOption(Int)
-    case chatDensityOption(Int)
+    case chatTextSizeOption(Int)
+    case chatLineSpacingOption(Int)
     case chatWidthOption(Int)
     case chatLayoutOption(Int)
     case youtubeMergeToggle
     case youtubeMergeURL
   }
 
-  private var chatReadabilityMode: ChatReadabilityMode {
-    ChatReadabilityMode(rawValue: chatReadabilityModeRaw) ?? .balanced
+  private var chatTextSize: ChatTextSizeOption {
+    ChatTextSizeOption(rawValue: chatTextSizeRaw) ?? .medium
+  }
+
+  private var chatLineSpacing: ChatLineSpacingOption {
+    ChatLineSpacingOption(rawValue: chatLineSpacingRaw) ?? .normal
   }
 
   private var chatWidthMode: ChatWidthMode {
@@ -202,7 +207,6 @@ struct PlayerView: View {
     }
     .task {
       configurePlayerForLive()
-      applyChatReadabilitySettings()
       applyExperimentalYouTubeSettings()
       chat.connect(to: channel)
       async let metadataTask: Void = refreshChannelMetadata()
@@ -264,9 +268,6 @@ struct PlayerView: View {
         scheduleHide()
       }
     }
-    .onChange(of: chatReadabilityModeRaw) { _, _ in
-      applyChatReadabilitySettings()
-    }
     .onChange(of: experimentalYouTubeMergeEnabled) { _, _ in
       applyExperimentalYouTubeSettings()
     }
@@ -314,6 +315,7 @@ struct PlayerView: View {
       if isLoading {
         ProgressView("Loading \(channel)…")
           .font(.title3)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       }
 
       if let errorMessage {
@@ -553,11 +555,11 @@ struct PlayerView: View {
       ChatView(
         channel: channel,
         messages: chat.messages,
-        readabilityMode: chatReadabilityMode,
+        textSize: chatTextSize,
+        lineSpacing: chatLineSpacing,
         isConnected: chat.isConnected,
         emoteURLs: chat.emoteURLs,
         badgeURLs: chat.badgeURLs,
-        condensedMessagesCount: chat.condensedMessagesCount,
         useGlassBackground: isGlass
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -608,18 +610,37 @@ struct PlayerView: View {
   private var chatSettingsPanel: some View {
     VStack(alignment: .leading, spacing: 28) {
       VStack(alignment: .leading, spacing: 12) {
-        Text("Message Density")
+        Text("Text Size")
           .font(.headline)
           .foregroundStyle(.white)
 
         HStack(spacing: 14) {
-          ForEach(Array(ChatReadabilityMode.allCases.enumerated()), id: \.offset) { index, mode in
+          ForEach(Array(ChatTextSizeOption.allCases.enumerated()), id: \.offset) { index, option in
             settingsPill(
-              title: mode.title,
-              isSelected: mode == chatReadabilityMode,
-              focusTag: .chatDensityOption(index)
+              title: option.title,
+              isSelected: option == chatTextSize,
+              focusTag: .chatTextSizeOption(index)
             ) {
-              chatReadabilityModeRaw = mode.rawValue
+              chatTextSizeRaw = option.rawValue
+            }
+          }
+        }
+        .focusSection()
+      }
+
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Message Spacing")
+          .font(.headline)
+          .foregroundStyle(.white)
+
+        HStack(spacing: 14) {
+          ForEach(Array(ChatLineSpacingOption.allCases.enumerated()), id: \.offset) { index, option in
+            settingsPill(
+              title: option.title,
+              isSelected: option == chatLineSpacing,
+              focusTag: .chatLineSpacingOption(index)
+            ) {
+              chatLineSpacingRaw = option.rawValue
             }
           }
         }
@@ -749,8 +770,8 @@ struct PlayerView: View {
   private func toggleChatSettings() {
     showChatSettings.toggle()
     if showChatSettings {
-      let selected = ChatReadabilityMode.allCases.firstIndex(of: chatReadabilityMode) ?? 0
-      focus = .chatDensityOption(selected)
+      let selected = ChatTextSizeOption.allCases.firstIndex(of: chatTextSize) ?? 0
+      focus = .chatTextSizeOption(selected)
     } else {
       focus = .chatSettingsButton
     }
@@ -1033,14 +1054,6 @@ struct PlayerView: View {
     showCaptionsPicker = false
     focus = .captions
     scheduleHide()
-  }
-
-  private func applyChatReadabilitySettings() {
-    chat.applyReadabilitySettings(
-      mode: chatReadabilityMode,
-      smartFilteringEnabled: false,
-      collapseRepeatsEnabled: false
-    )
   }
 
   private func applyExperimentalYouTubeSettings() {

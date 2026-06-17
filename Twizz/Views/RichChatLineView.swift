@@ -6,7 +6,8 @@ struct RichChatLineView: View {
     let nameColor: Color
     let globalEmoteURLs: [String: URL]
     let badgeURLs: [String: URL]
-    var readabilityMode: ChatReadabilityMode = .balanced
+    var textSize: ChatTextSizeOption = .medium
+    var lineSpacing: ChatLineSpacingOption = .normal
 
     private enum Segment: Hashable {
         case text(String)
@@ -21,84 +22,81 @@ struct RichChatLineView: View {
         message.badgeKeys.compactMap { badgeURLs[$0] }
     }
 
+    private var shouldShowSourceBadge: Bool {
+        message.source == .youtube
+    }
+
     private var sourceBadgeTitle: String {
-        switch message.source {
-        case .twitch: return "TW"
-        case .youtube: return "YT"
-        }
+        "YT"
     }
 
     private var sourceBadgeFill: Color {
-        switch message.source {
-        case .twitch: return Color(twitchHex: "#9146FF") ?? .purple
-        case .youtube: return Color(twitchHex: "#FF0000") ?? .red
-        }
+        Color(twitchHex: "#FF0000") ?? .red
     }
 
     private var sourceBadgeTextColor: Color {
-        switch message.source {
-        case .twitch: return .white
-        case .youtube: return .white
-        }
+        .white
     }
 
     private var sourceBadgeFontSize: CGFloat {
-        switch readabilityMode {
-        case .comfortable: return 16
-        case .balanced: return 15
-        case .compact: return 13
+        switch textSize {
+        case .small: return 13
+        case .medium: return 15
+        case .large: return 16
         }
     }
 
     private var nameFontSize: CGFloat {
-        switch readabilityMode {
-        case .comfortable: return 28
-        case .balanced: return 26
-        case .compact: return 22
+        switch textSize {
+        case .small: return 22
+        case .medium: return 26
+        case .large: return 28
         }
     }
 
     private var bodyFontSize: CGFloat {
-        switch readabilityMode {
-        case .comfortable: return 28
-        case .balanced: return 26
-        case .compact: return 22
+        switch textSize {
+        case .small: return 22
+        case .medium: return 26
+        case .large: return 28
         }
     }
 
     private var badgeSize: CGFloat {
-        switch readabilityMode {
-        case .comfortable: return 24
-        case .balanced: return 22
-        case .compact: return 18
+        switch textSize {
+        case .small: return 18
+        case .medium: return 22
+        case .large: return 24
         }
     }
 
     private var rowSpacing: CGFloat {
-        switch readabilityMode {
-        case .comfortable: return 6
-        case .balanced: return 4
-        case .compact: return 2
+        switch lineSpacing {
+        case .tight: return 2
+        case .normal: return 4
+        case .relaxed: return 6
         }
     }
 
     private var emoteHeight: CGFloat {
-        switch readabilityMode {
-        case .comfortable: return 36
-        case .balanced: return 34
-        case .compact: return 28
+        switch textSize {
+        case .small: return 28
+        case .medium: return 34
+        case .large: return 36
         }
     }
 
     var body: some View {
         ChatFlowLayout(itemSpacing: 0, rowSpacing: rowSpacing) {
-            Text(sourceBadgeTitle)
-                .font(.system(size: sourceBadgeFontSize, weight: .bold, design: .rounded))
-                .foregroundStyle(sourceBadgeTextColor)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(sourceBadgeFill, in: Capsule())
-                .padding(.trailing, 6)
+            if shouldShowSourceBadge {
+                Text(sourceBadgeTitle)
+                    .font(.system(size: sourceBadgeFontSize, weight: .bold, design: .rounded))
+                    .foregroundStyle(sourceBadgeTextColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(sourceBadgeFill, in: Capsule())
+                    .padding(.trailing, 6)
+            }
 
             ForEach(Array(resolvedBadgeURLs.enumerated()), id: \.offset) { _, badgeURL in
                 badgeView(url: badgeURL)
