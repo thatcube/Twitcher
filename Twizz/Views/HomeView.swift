@@ -107,9 +107,32 @@ struct HomeView: View {
     Button {
       showAccount = true
     } label: {
-      Image(systemName: auth.isAuthenticated ? "person.crop.circle.fill" : "person.crop.circle")
-        .font(.title2)
-        .padding(12)
+      Group {
+        if auth.isAuthenticated, let imageURL = auth.profileImageURL {
+          AsyncImage(url: imageURL) { image in
+            image
+              .resizable()
+              .scaledToFill()
+          } placeholder: {
+            Image(systemName: "person.crop.circle.fill")
+              .resizable()
+              .scaledToFit()
+              .foregroundStyle(.secondary)
+          }
+        } else {
+          Image(systemName: "person.crop.circle")
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(.primary)
+        }
+      }
+      .frame(width: 56, height: 56)
+      .clipShape(Circle())
+      .overlay(
+        Circle()
+          .stroke(Color.white.opacity(0.25), lineWidth: 2)
+      )
+      .padding(8)
     }
     .buttonStyle(.plain)
     .accessibilityLabel(auth.isAuthenticated ? "Account" : "Sign in")
@@ -120,8 +143,6 @@ struct HomeView: View {
       let rail = channelRailMetrics(for: proxy.size.width)
 
       VStack(alignment: .leading, spacing: 24) {
-        authBanner
-
         HStack {
           Text(follows.isUsingDemoData ? "Trending" : "Following")
             .font(.title.weight(.bold))
@@ -185,6 +206,8 @@ struct HomeView: View {
         }
 
         Spacer(minLength: 0)
+
+        authBanner
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -210,19 +233,38 @@ struct HomeView: View {
   @ViewBuilder
   private var authBanner: some View {
     if !auth.isAuthenticated {
-      HStack(spacing: 14) {
-        Button("Sign In With Twitch") {
-          showAccount = true
-        }
+      HStack(spacing: 28) {
+        Image(systemName: "person.crop.circle.badge.plus")
+          .font(.system(size: 44))
+          .foregroundStyle(Color(red: 0.58, green: 0.41, blue: 0.96))
 
-        if follows.isUsingDemoData {
-          Text("Showing trending channels until you sign in.")
-            .font(.footnote)
+        VStack(alignment: .leading, spacing: 6) {
+          Text("Sign in with Twitch")
+            .font(.title2.weight(.bold))
+          Text("Connect your account to see the channels you follow and join the chat.")
+            .font(.callout)
             .foregroundStyle(.secondary)
         }
+
+        Spacer(minLength: 24)
+
+        Button("Sign In") {
+          showAccount = true
+        }
+        .font(.headline)
       }
-      .padding(16)
-      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+      .padding(.vertical, 32)
+      .padding(.horizontal, 40)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(
+        RoundedRectangle(cornerRadius: 28)
+          .fill(.ultraThinMaterial)
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 28)
+          .stroke(Color.white.opacity(0.12), lineWidth: 1)
+      )
+      .padding(.top, 12)
     }
   }
 

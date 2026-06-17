@@ -14,6 +14,7 @@ final class TwitchAuthSession {
     private(set) var userID: String?
     private(set) var userLogin: String?
     private(set) var userDisplayName: String?
+    private(set) var profileImageURL: URL?
     private(set) var accessToken: String?
 
     private(set) var isAuthenticating = false
@@ -62,8 +63,16 @@ final class TwitchAuthSession {
         }
 
         return [
-            // Keep defaults minimal for TV sign-in reliability.
-            "user:read:follows"
+            // Read the signed-in user's followed channels.
+            "user:read:follows",
+            // Read chat messages (Helix / EventSub) and via IRC.
+            "user:read:chat",
+            "chat:read",
+            // Send chat messages (Helix Send Chat Message) and via IRC.
+            "user:write:chat",
+            "chat:edit",
+            // Send and read whispers (direct messages).
+            "user:manage:whispers"
         ]
     }
 
@@ -72,6 +81,7 @@ final class TwitchAuthSession {
         static let userID = "twitch.auth.userID"
         static let userLogin = "twitch.auth.userLogin"
         static let userDisplayName = "twitch.auth.userDisplayName"
+        static let profileImageURL = "twitch.auth.profileImageURL"
     }
 
     func restore() {
@@ -86,6 +96,7 @@ final class TwitchAuthSession {
         userID = userDefaults.string(forKey: StorageKey.userID)
         userLogin = userDefaults.string(forKey: StorageKey.userLogin)
         userDisplayName = userDefaults.string(forKey: StorageKey.userDisplayName)
+        profileImageURL = userDefaults.string(forKey: StorageKey.profileImageURL).flatMap(URL.init(string:))
         isAuthenticated = accessToken != nil && userID != nil
         statusMessage = nil
         errorMessage = nil
@@ -101,6 +112,7 @@ final class TwitchAuthSession {
         userID = nil
         userLogin = nil
         userDisplayName = nil
+        profileImageURL = nil
         activationCode = nil
         verificationURI = nil
         verificationURIComplete = nil
@@ -111,6 +123,7 @@ final class TwitchAuthSession {
         userDefaults.removeObject(forKey: StorageKey.userID)
         userDefaults.removeObject(forKey: StorageKey.userLogin)
         userDefaults.removeObject(forKey: StorageKey.userDisplayName)
+        userDefaults.removeObject(forKey: StorageKey.profileImageURL)
     }
 
     private func clearStoredAuthState() {
@@ -118,6 +131,7 @@ final class TwitchAuthSession {
         userID = nil
         userLogin = nil
         userDisplayName = nil
+        profileImageURL = nil
         isAuthenticated = false
         isAuthenticating = false
 
@@ -125,6 +139,7 @@ final class TwitchAuthSession {
         userDefaults.removeObject(forKey: StorageKey.userID)
         userDefaults.removeObject(forKey: StorageKey.userLogin)
         userDefaults.removeObject(forKey: StorageKey.userDisplayName)
+        userDefaults.removeObject(forKey: StorageKey.profileImageURL)
     }
 
     func beginDeviceCodeSignIn() async {
@@ -221,11 +236,13 @@ final class TwitchAuthSession {
 
         let resolvedLogin = profile?.login ?? identity.login
         let resolvedDisplayName = profile?.displayName ?? identity.login
+        let resolvedImageURL = profile?.profileImageURL.flatMap(URL.init(string:))
 
         self.accessToken = accessToken
         self.userID = identity.userID
         self.userLogin = resolvedLogin
         self.userDisplayName = resolvedDisplayName
+        self.profileImageURL = resolvedImageURL
         self.isAuthenticated = true
         self.isAuthenticating = false
         self.statusMessage = "Signed in as \(resolvedDisplayName)."
@@ -235,6 +252,11 @@ final class TwitchAuthSession {
         userDefaults.set(identity.userID, forKey: StorageKey.userID)
         userDefaults.set(resolvedLogin, forKey: StorageKey.userLogin)
         userDefaults.set(resolvedDisplayName, forKey: StorageKey.userDisplayName)
+        if let resolvedImageURL {
+            userDefaults.set(resolvedImageURL.absoluteString, forKey: StorageKey.profileImageURL)
+        } else {
+            userDefaults.removeObject(forKey: StorageKey.profileImageURL)
+        }
     }
 
     private func requestDeviceCode(clientID: String) async throws -> DeviceCodeResponse {
@@ -431,10 +453,12 @@ private struct UserProfile: Decodable {
     let id: String
     let login: String
     let displayName: String
+    let profileImageURL: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
         case login
         case displayName = "display_name"
+        case profileImageURL = "profile_image_url"
     }
 }
