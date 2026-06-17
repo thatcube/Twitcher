@@ -710,6 +710,28 @@ struct PlayerView: View {
             .textFieldStyle(.plain)
             .font(.callout)
             .lineLimit(1)
+            // The native tvOS field has a tall intrinsic height with its text
+            // pinned near the top. Pin the field to a fixed compact height and
+            // clip the dead space below so the text reads as vertically
+            // centered inside our own rounded box.
+            .frame(height: 44)
+            .clipped()
+            .padding(.horizontal, 18)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            .background(
+              RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.10))
+            )
+            .overlay(
+              RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(
+                  focus == .chatInput
+                    ? Color.white.opacity(0.55)
+                    : Color.white.opacity(0.18),
+                  lineWidth: focus == .chatInput ? 2 : 1
+                )
+            )
             .focused($focus, equals: .chatInput)
             .onMoveCommand { direction in
               switch direction {
