@@ -937,7 +937,6 @@ struct PlayerView: View {
             isFocused: focus == .chatInput
           )
           .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
-          .opacity(0.02)
           .overlay(alignment: .leading) {
             Text(chatDraft.isEmpty ? "Send a message" : chatDraft)
               .font(.callout)
@@ -1016,7 +1015,6 @@ struct PlayerView: View {
           }
         )
         .modifier(ChatInputShellStyle(isFocused: focus == .chatInput))
-        .opacity(0.02)
         .overlay(alignment: .leading) {
           Text("Sign in to send messages")
             .font(.callout)
@@ -1820,9 +1818,15 @@ private struct ChatInputShellStyle: ViewModifier {
       content
         .padding(.horizontal, 16)
         .clipShape(shape)
+        .background(.white.opacity(isFocused ? 0.10 : 0.06), in: shape)
         .glassEffect(.regular, in: shape)
+        .overlay(
+          shape
+            .strokeBorder(.white.opacity(isFocused ? 0.34 : 0.20), lineWidth: 1)
+        )
         .scaleEffect(isFocused ? 1.01 : 1.0)
-        .shadow(color: .white.opacity(isFocused ? 0.14 : 0), radius: 12, x: 0, y: 0)
+        .shadow(color: .white.opacity(isFocused ? 0.12 : 0.05), radius: 8, x: 0, y: 0)
+        .shadow(color: .black.opacity(0.30), radius: 8, x: 0, y: 3)
     } else {
       content
         .padding(.horizontal, 16)
@@ -1868,6 +1872,7 @@ private struct ChatInputField: UIViewRepresentable {
       action: #selector(Coordinator.editingChanged(_:)),
       for: .editingChanged
     )
+    field.alpha = 0.01
     return field
   }
 
@@ -1879,7 +1884,7 @@ private struct ChatInputField: UIViewRepresentable {
     context.coordinator.allowsEditing = allowsEditing
     context.coordinator.onActivate = onActivate
 
-    uiView.alpha = 0.02
+    uiView.alpha = 0.01
     uiView.backgroundColor = .clear
     uiView.textColor = .clear
     uiView.tintColor = .clear
