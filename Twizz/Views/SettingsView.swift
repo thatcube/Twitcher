@@ -9,6 +9,7 @@ struct SettingsView: View {
 
   @Environment(\.themePalette) private var palette
   @State private var showSignOutConfirm = false
+  @FocusState private var focusedTheme: AppTheme?
 
   var body: some View {
     ZStack {
@@ -54,6 +55,7 @@ struct SettingsView: View {
             )
           }
           .buttonStyle(.card)
+          .focused($focusedTheme, equals: theme)
         }
       }
     }
@@ -62,6 +64,7 @@ struct SettingsView: View {
     // this container's bounding box instead of falling through to Sign In.
     .frame(maxWidth: .infinity, alignment: .leading)
     .focusSection()
+    .defaultFocus($focusedTheme, AppTheme.system)
   }
 
   // MARK: - Account
