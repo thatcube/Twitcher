@@ -51,6 +51,7 @@ struct PlayerView: View {
   @State private var playback: StreamPlayback?
   @State private var errorMessage: String?
   @State private var isLoading = true
+  @State private var loadingRotation: Double = 0
   @State private var showChat = true
   @State private var showQualityPicker = false
   @State private var showCaptionsPicker = false
@@ -201,8 +202,26 @@ struct PlayerView: View {
       applyChatReadabilitySettings()
       chat.connect(to: channel)
       async let metadataTask: Void = refreshChannelMetadata()
+      
+      // Start loading animation
+      let animationTask = Task {
+        var rotation: Double = 0
+        while !Task.isCancelled {
+          rotation += 6  // 60 rotations per second at 100ms intervals
+          if rotation >= 360 {
+            rotation -= 360
+          }
+          withAnimation(.linear(duration: 0.016)) {
+            loadingRotation = rotation
+          }
+          try? await Task.sleep(nanoseconds: 16_000_000)  // ~60fps
+        }
+      }
+      
       await load()
       _ = await metadataTask
+      animationTask.cancel()
+      loadingRotation = 0
       focus = .video
     }
     .onAppear {
@@ -317,13 +336,13 @@ struct PlayerView: View {
                 lineWidth: 4
               )
               .frame(width: 80, height: 80)
-              .rotationEffect(.degrees(Double(Date().timeIntervalSince1970) * 360))
+              .rotationEffect(.degrees(loadingRotation))
 
             // Inner pulsing dot
             Circle()
               .fill(.white)
               .frame(width: 12, height: 12)
-              .opacity(0.5 + 0.5 * sin(Double(Date().timeIntervalSince1970) * 2 * .pi))
+              .opacity(0.5 + 0.5 * sin(loadingRotation * .pi / 180))
           }
 
           VStack(spacing: 8) {
