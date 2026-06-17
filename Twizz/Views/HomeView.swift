@@ -97,7 +97,8 @@ struct HomeView: View {
               await refreshFollowedChannelsIfNeeded(force: true)
               requestFocusIfPossible(force: true)
             }
-          }
+          },
+          onRepublishTopShelf: { publishTopShelfSnapshot() }
         )
       }
       .tag(SidebarTab.settings)
