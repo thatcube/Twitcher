@@ -217,6 +217,10 @@ struct HomeView: View {
 }
 
 private struct FollowedChannelCard: View {
+  private let mediaWidth: CGFloat = 560
+  private let mediaHeight: CGFloat = 315
+  private let focusHorizontalInset: CGFloat = 12
+  private let focusVerticalInset: CGFloat = 10
   private let cardCornerRadius: CGFloat = 22
   private let mediaCornerRadius: CGFloat = 18
 
@@ -233,8 +237,7 @@ private struct FollowedChannelCard: View {
         } placeholder: {
           Color.white.opacity(0.08)
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 315)
+        .frame(width: mediaWidth, height: mediaHeight)
         .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
 
         LinearGradient(
@@ -242,9 +245,9 @@ private struct FollowedChannelCard: View {
           startPoint: .top,
           endPoint: .bottom
         )
+        .frame(width: mediaWidth, height: mediaHeight)
         .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius))
 
-      .frame(maxWidth: .infinity)
         HStack(spacing: 8) {
           Circle()
             .fill(channel.isLive ? Color.red : Color.gray)
@@ -260,6 +263,7 @@ private struct FollowedChannelCard: View {
         }
         .padding(12)
       }
+      .frame(width: mediaWidth, alignment: .leading)
 
       Text(channel.displayName)
         .font(.headline)
@@ -277,9 +281,9 @@ private struct FollowedChannelCard: View {
         .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.secondary)
         .lineLimit(1)
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 10)
-    .frame(width: 560, alignment: .leading)
+    .padding(.horizontal, focusHorizontalInset)
+    .padding(.vertical, focusVerticalInset)
+    .frame(width: mediaWidth + (focusHorizontalInset * 2), alignment: .leading)
     .background {
       RoundedRectangle(cornerRadius: cardCornerRadius)
         .fill(isFocused ? Color.white.opacity(0.94) : Color.clear)
