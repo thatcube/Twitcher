@@ -711,23 +711,7 @@ struct PlayerView: View {
             placeholder: "Send a message",
             isFocused: focus == .chatInput
           )
-          .frame(height: 30)
-          .padding(.horizontal, 18)
-          .padding(.vertical, 10)
           .frame(maxWidth: .infinity)
-          .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-              .fill(Color.white.opacity(0.10))
-          )
-          .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-              .strokeBorder(
-                focus == .chatInput
-                  ? Color.white.opacity(0.55)
-                  : Color.white.opacity(0.18),
-                lineWidth: focus == .chatInput ? 2 : 1
-              )
-          )
           .focused($focus, equals: .chatInput)
           .onMoveCommand { direction in
             switch direction {
@@ -1522,31 +1506,6 @@ extension View {
   }
 }
 
-/// A `UITextField` subclass that suppresses the tvOS focus platter — the
-/// white (focused) / gray (unfocused) rounded background the focus engine
-/// layers behind the text. That platter is narrower than our custom box and
-/// produces an "input inside an input" look. We hide any background/platter
-/// subviews and keep the field's own background clear so only our SwiftUI box
-/// shows. Focus is still conveyed by our box's brightening border.
-private final class PlatterlessTextField: UITextField {
-  override func layoutSubviews() {
-    super.layoutSubviews()
-    backgroundColor = .clear
-    for subview in subviews {
-      // The text label/content views report a meaningful intrinsic size; the
-      // platter is an opaque, full-bounds background view. Hide views that are
-      // not the editable text content.
-      let typeName = String(describing: type(of: subview)).lowercased()
-      if typeName.contains("background") || typeName.contains("platter")
-        || typeName.contains("focus") || typeName.contains("border")
-      {
-        subview.isHidden = true
-        subview.backgroundColor = .clear
-      }
-    }
-  }
-}
-
 /// A fully custom chat input backed by a `UITextField` so we control the
 /// background (clear — no native focus platter) and vertically center the text.
 /// SwiftUI's `TextField` on tvOS draws its own opaque focus platter that can't
@@ -1557,7 +1516,7 @@ private struct ChatInputField: UIViewRepresentable {
   let isFocused: Bool
 
   func makeUIView(context: Context) -> UITextField {
-    let field = PlatterlessTextField()
+    let field = UITextField()
     field.delegate = context.coordinator
     field.borderStyle = .none
     field.backgroundColor = .clear
@@ -1583,6 +1542,20 @@ private struct ChatInputField: UIViewRepresentable {
     if uiView.text != text {
       uiView.text = text
     }
+
+    // In the focused tvOS state, the system draws a bright field background.
+    // Match text and placeholder colors so content remains readable.
+    let foreground: UIColor = isFocused ? .black : .white
+    let placeholderColor = isFocused
+      ? UIColor.black.withAlphaComponent(0.45)
+      : UIColor.white.withAlphaComponent(0.45)
+
+    uiView.textColor = foreground
+    uiView.tintColor = foreground
+    uiView.attributedPlaceholder = NSAttributedString(
+      string: placeholder,
+      attributes: [.foregroundColor: placeholderColor]
+    )
   }
 
   func makeCoordinator() -> Coordinator {
