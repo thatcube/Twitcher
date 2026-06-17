@@ -22,6 +22,19 @@ struct RichChatLineView: View {
         message.badgeKeys.compactMap { badgeURLs[$0] }
     }
 
+    private var messageScopedEmoteURLs: [String: URL] {
+        message.twitchEmoteURLs.merging(message.youtubeEmoteURLs) { current, _ in current }
+    }
+
+    private var messageScopedEmoteKeysByLength: [String] {
+        messageScopedEmoteURLs.keys.sorted { lhs, rhs in
+            if lhs.count == rhs.count {
+                return lhs < rhs
+            }
+            return lhs.count > rhs.count
+        }
+    }
+
     private var shouldShowSourceBadge: Bool {
         message.source == .youtube
     }
@@ -177,7 +190,9 @@ struct RichChatLineView: View {
                 output.append(.text(String(leading)))
             }
 
-            if let url = message.twitchEmoteURLs[core] ?? message.youtubeEmoteURLs[core] ?? globalEmoteURLs[core] {
+            if let inlineSegments = inlineMessageScopedEmoteSegments(for: core) {
+                output.append(contentsOf: inlineSegments)
+            } else if let url = messageScopedEmoteURLs[core] ?? globalEmoteURLs[core] {
                 output.append(.emote(name: core, url: url))
             } else {
                 output.append(.text(core))
@@ -193,6 +208,48 @@ struct RichChatLineView: View {
         }
 
         return output
+    }
+
+    private func inlineMessageScopedEmoteSegments(for token: String) -> [Segment]? {
+        guard !token.isEmpty else { return nil }
+        guard !messageScopedEmoteKeysByLength.isEmpty else { return nil }
+
+        var out: [Segment] = []
+        var textBuffer = ""
+        var index = token.startIndex
+        var matchedAny = false
+
+        while index < token.endIndex {
+            var matchedKey: String?
+            var matchedURL: URL?
+
+            for key in messageScopedEmoteKeysByLength {
+                guard token[index...].hasPrefix(key) else { continue }
+                guard let url = messageScopedEmoteURLs[key] else { continue }
+                matchedKey = key
+                matchedURL = url
+                break
+            }
+
+            if let matchedKey, let matchedURL {
+                matchedAny = true
+                if !textBuffer.isEmpty {
+                    out.append(.text(textBuffer))
+                    textBuffer = ""
+                }
+                out.append(.emote(name: matchedKey, url: matchedURL))
+                index = token.index(index, offsetBy: matchedKey.count)
+            } else {
+                textBuffer.append(token[index])
+                token.formIndex(after: &index)
+            }
+        }
+
+        if !textBuffer.isEmpty {
+            out.append(.text(textBuffer))
+        }
+
+        return matchedAny ? out : nil
     }
 }
 
