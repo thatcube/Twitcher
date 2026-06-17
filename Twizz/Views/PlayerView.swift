@@ -590,7 +590,7 @@ struct PlayerView: View {
   /// It is only reachable by pressing up from the chat input, so it never
   /// steals focus while the user is scrolling or typing.
   private var chatSettingsFloating: some View {
-    VStack(alignment: .trailing, spacing: 14) {
+    VStack(alignment: .trailing, spacing: 10) {
       Button {
         toggleChatSettings()
       } label: {
@@ -615,13 +615,15 @@ struct PlayerView: View {
   }
 
   private var chatSettingsPanel: some View {
-    VStack(alignment: .leading, spacing: 28) {
-      VStack(alignment: .leading, spacing: 12) {
+    ScrollView(.vertical, showsIndicators: false) {
+      VStack(alignment: .leading, spacing: 18) {
+      VStack(alignment: .leading, spacing: 7) {
         Text("Text Size")
-          .font(.headline)
-          .foregroundStyle(.white)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.84))
+          .textCase(.uppercase)
 
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
           ForEach(Array(ChatTextSizeOption.allCases.enumerated()), id: \.offset) { index, option in
             settingsPill(
               title: option.title,
@@ -635,12 +637,13 @@ struct PlayerView: View {
         .focusSection()
       }
 
-      VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 7) {
         Text("Line Height")
-          .font(.headline)
-          .foregroundStyle(.white)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.84))
+          .textCase(.uppercase)
 
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
           ForEach(Array(ChatLineHeightOption.allCases.enumerated()), id: \.offset) { index, option in
             settingsPill(
               title: option.title,
@@ -654,12 +657,13 @@ struct PlayerView: View {
         .focusSection()
       }
 
-      VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 7) {
         Text("Message Spacing")
-          .font(.headline)
-          .foregroundStyle(.white)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.84))
+          .textCase(.uppercase)
 
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
           ForEach(Array(ChatLineSpacingOption.allCases.enumerated()), id: \.offset) { index, option in
             settingsPill(
               title: option.title,
@@ -673,12 +677,13 @@ struct PlayerView: View {
         .focusSection()
       }
 
-      VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 7) {
         Text("Chat Width")
-          .font(.headline)
-          .foregroundStyle(.white)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.84))
+          .textCase(.uppercase)
 
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
           ForEach(Array(ChatWidthMode.allCases.enumerated()), id: \.offset) { index, mode in
             settingsPill(
               title: mode.title,
@@ -692,12 +697,13 @@ struct PlayerView: View {
         .focusSection()
       }
 
-      VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 7) {
         Text("Chat Position")
-          .font(.headline)
-          .foregroundStyle(.white)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.84))
+          .textCase(.uppercase)
 
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
           ForEach(Array(ChatLayoutMode.allCases.enumerated()), id: \.offset) { index, mode in
             settingsPill(
               title: mode.title,
@@ -717,14 +723,15 @@ struct PlayerView: View {
         .focusSection()
       }
 
-      VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 7) {
         Text("Experimental")
-          .font(.headline)
-          .foregroundStyle(.white)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.84))
+          .textCase(.uppercase)
 
         Text("Merge YouTube live chat (no sign-in). This may break if YouTube changes internals.")
-          .font(.caption)
-          .foregroundStyle(.white.opacity(0.72))
+          .font(.caption2)
+          .foregroundStyle(.white.opacity(0.66))
           .fixedSize(horizontal: false, vertical: true)
 
         settingsPill(
@@ -740,13 +747,13 @@ struct PlayerView: View {
           placeholder: "YouTube live URL or video ID",
           isFocused: focus == .youtubeMergeURL
         )
-        .frame(height: 52)
-        .frame(width: 440)
-        .padding(.horizontal, 14)
-        .background(.white.opacity(focus == .youtubeMergeURL ? 0.88 : 0.12), in: RoundedRectangle(cornerRadius: 12))
+        .frame(height: 44)
+        .frame(width: 384)
+        .padding(.horizontal, 12)
+        .background(.white.opacity(focus == .youtubeMergeURL ? 0.86 : 0.09), in: RoundedRectangle(cornerRadius: 11))
         .overlay(
-          RoundedRectangle(cornerRadius: 12)
-            .stroke(.white.opacity(0.18), lineWidth: 1)
+          RoundedRectangle(cornerRadius: 11)
+            .stroke(.white.opacity(0.22), lineWidth: 1)
         )
         .focused($focus, equals: .youtubeMergeURL)
         .onMoveCommand { direction in
@@ -757,16 +764,25 @@ struct PlayerView: View {
 
         if let status = chat.youtubeStatusMessage, experimentalYouTubeMergeEnabled {
           Text(status)
-            .font(.caption)
-            .foregroundStyle(.white.opacity(0.78))
+            .font(.caption2)
+            .foregroundStyle(.white.opacity(0.76))
             .fixedSize(horizontal: false, vertical: true)
         }
       }
       .focusSection()
+      }
+      .padding(.vertical, 18)
+      .padding(.horizontal, 20)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .padding(28)
-    .fixedSize(horizontal: true, vertical: true)
-    .background(Color(white: 0.12).opacity(0.98), in: RoundedRectangle(cornerRadius: 24))
+    .frame(width: 500)
+    .frame(maxHeight: 680)
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 22, style: .continuous)
+        .stroke(.white.opacity(0.20), lineWidth: 1)
+    )
+    .shadow(color: .black.opacity(0.30), radius: 22, x: 0, y: 10)
     .focusSection()
   }
 
@@ -780,16 +796,24 @@ struct PlayerView: View {
       HStack(spacing: 8) {
         if isSelected {
           Image(systemName: "checkmark")
-            .font(.callout.weight(.bold))
+            .font(.caption.weight(.bold))
         }
         Text(title)
-          .font(.callout.weight(isSelected ? .semibold : .regular))
+          .font(.subheadline.weight(isSelected ? .semibold : .regular))
           .fixedSize()
       }
-      .padding(.horizontal, 22)
-      .padding(.vertical, 12)
+      .padding(.horizontal, 14)
+      .padding(.vertical, 7)
+      .background(
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+          .fill(.white.opacity(isSelected ? 0.20 : 0.08))
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+          .stroke(.white.opacity(isSelected ? 0.42 : 0.18), lineWidth: 1)
+      )
     }
-    .buttonStyle(.bordered)
+    .buttonStyle(.plain)
     .focused($focus, equals: focusTag)
   }
 
