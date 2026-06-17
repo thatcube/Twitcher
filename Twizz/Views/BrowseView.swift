@@ -11,7 +11,26 @@ struct BrowseView: View {
     @State private var lastSelectedCategoryID: String?
 
     var body: some View {
-        Group {
+        ZStack {
+            BrowseCategoriesView(
+                service: service,
+                preferredFocusedID: lastSelectedCategoryID,
+                isActive: selectedCategory == nil,
+                onSelectCategory: { category in
+                    lastSelectedCategoryID = category.id
+                    selectedCategory = category
+                    Task { await service.loadStreams(for: category) }
+                }
+            )
+            .task {
+                if service.categories.isEmpty {
+                    await service.loadCategories()
+                }
+            }
+            .opacity(selectedCategory == nil ? 1 : 0)
+            .allowsHitTesting(selectedCategory == nil)
+            .accessibilityHidden(selectedCategory != nil)
+
             if let category = selectedCategory {
                 BrowseStreamsView(
                     category: category,
@@ -21,21 +40,6 @@ struct BrowseView: View {
                         selectedCategory = nil
                     }
                 )
-            } else {
-                BrowseCategoriesView(
-                    service: service,
-                    preferredFocusedID: lastSelectedCategoryID,
-                    onSelectCategory: { category in
-                        lastSelectedCategoryID = category.id
-                        selectedCategory = category
-                        Task { await service.loadStreams(for: category) }
-                    }
-                )
-                .task {
-                    if service.categories.isEmpty {
-                        await service.loadCategories()
-                    }
-                }
             }
         }
     }
@@ -46,6 +50,7 @@ struct BrowseView: View {
 private struct BrowseCategoriesView: View {
     let service: BrowseService
     let preferredFocusedID: String?
+    let isActive: Bool
     let onSelectCategory: (TwitchCategory) -> Void
 
     @FocusState private var focusedID: String?
@@ -120,6 +125,16 @@ private struct BrowseCategoriesView: View {
             else { return }
             Task {
                 try? await Task.sleep(for: .milliseconds(150))
+                await MainActor.run { focusedID = targetID }
+            }
+        }
+        .onChange(of: isActive) { _, active in
+            guard active,
+                  focusedID == nil,
+                  let targetID = initialFocusID(from: service.categories)
+            else { return }
+            Task {
+                try? await Task.sleep(for: .milliseconds(50))
                 await MainActor.run { focusedID = targetID }
             }
         }
