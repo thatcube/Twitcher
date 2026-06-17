@@ -466,7 +466,8 @@ struct PlayerView: View {
   }
 
   private var latencyBadge: some View {
-    HStack(spacing: 8) {
+    let shape = Capsule(style: .continuous)
+    return HStack(spacing: 8) {
       Circle()
         .fill(latencyColor)
         .frame(width: 8, height: 8)
@@ -475,22 +476,14 @@ struct PlayerView: View {
         .font(.caption)
         .fontWeight(.semibold)
         .foregroundStyle(.white)
-
-      if wallClockLatencySeconds != nil {
-        if let edge = liveEdgeLatencySeconds {
-          Text("(edge \(formatLatencySeconds(edge)))")
-            .font(.caption2)
-            .foregroundStyle(.white.opacity(0.75))
-        } else {
-          Text("(edge n/a)")
-            .font(.caption2)
-            .foregroundStyle(.white.opacity(0.75))
-        }
-      }
     }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 7)
-    .background(.black.opacity(0.62), in: Capsule())
+    .padding(.horizontal, 14)
+    .padding(.vertical, 9)
+    // Frosted material rather than focusable Liquid Glass: this is a passive
+    // HUD readout, so it should read as an info chip, not a pressable control.
+    .background(.ultraThinMaterial, in: shape)
+    .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+    .clipShape(shape)
   }
 
   // MARK: - Controls visibility
@@ -717,6 +710,7 @@ struct PlayerView: View {
             .textFieldStyle(.plain)
             .font(.callout)
             .lineLimit(1)
+            .padding(.top, 4)
             .focused($focus, equals: .chatInput)
             .onMoveCommand { direction in
               switch direction {
@@ -731,34 +725,36 @@ struct PlayerView: View {
               }
             }
 
-          Button {
-            submitChatMessage()
-          } label: {
-            if isSendingChat {
-              ProgressView()
-                .frame(width: 24, height: 24)
-            } else {
-              Image(systemName: "paperplane.fill")
-                .font(.system(size: 20, weight: .semibold))
-                .frame(width: 24, height: 24)
+          if hasChatDraft {
+            Button {
+              submitChatMessage()
+            } label: {
+              if isSendingChat {
+                ProgressView()
+                  .frame(width: 24, height: 24)
+              } else {
+                Image(systemName: "paperplane.fill")
+                  .font(.system(size: 20, weight: .semibold))
+                  .frame(width: 24, height: 24)
+              }
             }
-          }
-          .TwizzControlButtonStyle()
-          .disabled(isSendingChat || !hasChatDraft)
-          .focused($focus, equals: .chatSend)
-          .opacity(hasChatDraft ? 1 : 0)
-          .allowsHitTesting(hasChatDraft)
-          .onMoveCommand { direction in
-            switch direction {
-            case .left:
-              focus = .chatInput
-            case .up:
-              focus = .chatSettingsButton
-            default:
-              break
+            .TwizzControlButtonStyle()
+            .disabled(isSendingChat)
+            .focused($focus, equals: .chatSend)
+            .transition(.opacity)
+            .onMoveCommand { direction in
+              switch direction {
+              case .left:
+                focus = .chatInput
+              case .up:
+                focus = .chatSettingsButton
+              default:
+                break
+              }
             }
           }
         }
+        .frame(minHeight: 56)
         .animation(.easeOut(duration: 0.18), value: hasChatDraft)
       } else {
         Text("Sign in to send messages")
@@ -1125,13 +1121,10 @@ struct PlayerView: View {
 
   private var latencyLabel: String {
     if !isPlaybackActive {
-      return "Latency: waiting for playback"
+      return "Waiting for playback"
     }
-    if let liveEdgeLatencySeconds {
-      return "Live latency \(formatLatencySeconds(liveEdgeLatencySeconds))"
-    }
-    if let wallClockLatencySeconds {
-      return "Estimated latency \(formatLatencySeconds(wallClockLatencySeconds))"
+    if let seconds = measuredLatencySeconds {
+      return "Estimated latency \(formatLatencySeconds(seconds))"
     }
     return "Latency unavailable"
   }
