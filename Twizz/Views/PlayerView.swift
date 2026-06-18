@@ -1438,10 +1438,14 @@ struct PlayerView: View {
     .onPreferenceChange(ChatSettingsHeightKey.self) { height in
       chatSettingsContentHeight = height
     }
+    // Clip scrolled content to the panel shape so rows that scroll past the top
+    // or bottom edge are hidden inside the menu instead of bleeding out over the
+    // chat. tvOS auto-scrolls a focused row fully into view, and the content's
+    // generous interior padding keeps focus halos off this clip edge.
+    .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
     // Match the chat pane's real Liquid Glass (`.glassEffect(.regular)`) so the
     // panel reads the same as the Glass chat layout, instead of a flatter
-    // frosted material. Intentionally no clipShape: tvOS focus effects scale
-    // beyond bounds, and clipping reintroduces visibly cut-off focus states.
+    // frosted material.
     .modifier(ChatSettingsPanelGlassStyle())
     .shadow(color: .black.opacity(0.30), radius: 22, x: 0, y: 10)
     .animation(.easeOut(duration: 0.22), value: resolvedHeight)
@@ -1455,7 +1459,7 @@ struct PlayerView: View {
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Appearance")
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatAppearancePreset.allCases.enumerated()), id: \.element) { index, preset in
             settingsPill(
               title: preset.title,
@@ -1477,11 +1481,6 @@ struct PlayerView: View {
           openSubpage(.appearance)
         }
         .focusSection()
-
-        Text("Presets adjust text, emote, line height, and spacing together. Use Advanced for per-value control.")
-          .font(.caption2)
-          .foregroundStyle(.white.opacity(0.55))
-          .fixedSize(horizontal: false, vertical: true)
       }
 
       VStack(alignment: .leading, spacing: 7) {
@@ -1492,7 +1491,7 @@ struct PlayerView: View {
       VStack(alignment: .leading, spacing: 7) {
         settingsSectionHeader("Chat Position")
 
-        HStack(spacing: 8) {
+        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatLayoutMode.allCases.enumerated()), id: \.element) { index, mode in
             settingsPill(
               title: mode.title,
@@ -1735,6 +1734,7 @@ struct PlayerView: View {
             settingsPill(
               title: style.title,
               isSelected: style == chatFontStyle,
+              fontDesign: style.design,
               focusTag: .chatFontOption(index)
             ) {
               chatFontStyleRaw = style.rawValue
@@ -1790,6 +1790,7 @@ struct PlayerView: View {
     title: String,
     isSelected: Bool,
     icon: Glyph? = nil,
+    fontDesign: Font.Design? = nil,
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
@@ -1801,6 +1802,7 @@ struct PlayerView: View {
 
         Text(title)
           .font(.subheadline.weight(isSelected ? .semibold : .regular))
+          .fontDesign(fontDesign)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
 
