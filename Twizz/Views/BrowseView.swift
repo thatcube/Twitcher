@@ -301,9 +301,10 @@ private struct CategoryCard: View {
       .padding(.bottom, 12)
     }
     .padding(10)
-    .background {
-      RoundedRectangle(cornerRadius: cornerRadius)
-        .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
-    }
+    .twizzLiquidGlassCard(
+      cornerRadius: cornerRadius,
+      isFocused: isFocused,
+      palette: palette
+    )
   }
 }
