@@ -562,17 +562,26 @@ struct PlayerView: View {
           onMenuPresented: {
             focusRecoveryTask?.cancel()
             isQualityMenuPresented = true
+            // Native Menu takes over focus. Clearing our app-level focus state
+            // immediately prevents a stale focused shadow from lingering behind
+            // the popup until the next render tick.
+            focus = nil
           },
           onMenuDismissed: {
             isQualityMenuPresented = false
             focusRecoveryTask?.cancel()
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+              focus = .quality
+            }
             focusRecoveryTask = Task {
               // Let close animation settle, then restore anchor focus if needed.
               try? await Task.sleep(for: .milliseconds(40))
               guard !Task.isCancelled else { return }
               await MainActor.run {
                 guard showControls, !showChatSettings, !isQualityMenuPresented else { return }
-                guard focus == nil else { return }
+                guard focus == nil || focus == .quality else { return }
                 focus = .quality
               }
             }
@@ -580,6 +589,7 @@ struct PlayerView: View {
         )
         .equatable()
         .focused($focus, equals: .quality)
+        .focusEffectDisabled(isQualityMenuPresented)
         .onMoveCommand { direction in
           switch direction {
           case .left:
