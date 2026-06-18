@@ -25,13 +25,27 @@ final class AudioLevelMonitor {
   /// readout while we tune reactivity.
   private(set) var decodedSegmentCount = 0
   var pendingRealSamples: Int { realQueue.count }
+  /// Signed gap (ms) between the player's position and the loudness sample we're
+  /// showing — near zero means well aligned. Temporary diagnostic.
+  private(set) var syncLagMs: Int = 0
 
   private var decoder: AudioOnlyLevelDecoder?
   private var ticker: Timer?
   private var startTime = CACurrentMediaTime()
 
-  // Real-level playout queue: raw RMS values awaiting their turn on screen.
-  private var realQueue: [Double] = []
+  /// Returns the wall-clock date the player is *currently* playing, derived from
+  /// the stream's `EXT-X-PROGRAM-DATE-TIME`. Lets us show the loudness for the
+  /// audio actually leaving the speakers instead of the live edge we decoded.
+  private var playerClock: (() -> Date?)?
+
+  // One decoded loudness sample, optionally stamped with the media wall-clock
+  // time it represents so we can line it up with playback.
+  private struct RealSample {
+    let date: Date?
+    let level: Double
+  }
+  private var realQueue: [RealSample] = []
+  private var realSamplesAreDated = false
   private var queueInterval: Double = 0.05
   private var nextPopAt: CFTimeInterval = 0
   private var lastRealAt: CFTimeInterval = 0
@@ -42,15 +56,24 @@ final class AudioLevelMonitor {
   private let decay = 0.2
   private let realAudioTimeout: CFTimeInterval = 1.0
   private let tickInterval: TimeInterval = 1.0 / 60.0
-  // Cap the backlog (~12s) so we never drift far behind the live edge.
-  private let maxQueued = 240
+  // How far the head may trail the player before we consider the data stale.
+  private let syncTolerance: TimeInterval = 1.5
+  // Cap the backlog (~30s of dated history) so it can't grow without bound.
+  private let maxQueued = 600
 
   // MARK: - Lifecycle
 
   /// Starts the visualizer clock and, when an audio-only playlist URL is
   /// available, the background decoder that produces real loudness values.
-  func start(audioPlaylistURL: URL?, headers: [String: String]) {
+  /// `currentDate` reports the player's current media time so playout can be
+  /// aligned to what's actually being heard.
+  func start(
+    audioPlaylistURL: URL?,
+    headers: [String: String],
+    currentDate: (() -> Date?)? = nil
+  ) {
     startTime = CACurrentMediaTime()
+    playerClock = currentDate
     startTicker()
 
     guard let url = audioPlaylistURL else { return }
@@ -64,10 +87,13 @@ final class AudioLevelMonitor {
     ticker?.invalidate()
     ticker = nil
     stopDecoder()
+    playerClock = nil
     realQueue.removeAll()
+    realSamplesAreDated = false
     nextPopAt = 0
     lastRealAt = 0
     decodedSegmentCount = 0
+    syncLagMs = 0
     isReceivingRealAudio = false
   }
 
@@ -79,18 +105,32 @@ final class AudioLevelMonitor {
   }
 
   /// Called by the decoder (hopping to the main actor) with a freshly decoded
-  /// loudness contour for one segment of audio.
-  func enqueueRealLevels(_ contour: [Double], interval: Double) {
+  /// loudness contour for one segment of audio. `startDate` is the media
+  /// wall-clock time of the segment's first sample, when the playlist provides
+  /// it, so we can align playout to the player.
+  func enqueueRealLevels(_ contour: [Double], interval: Double, startDate: Date?) {
     guard !contour.isEmpty else { return }
     decodedSegmentCount += 1
     let wasIdle = (CACurrentMediaTime() - lastRealAt) > realAudioTimeout
     queueInterval = min(max(interval, 0.02), 0.12)
-    realQueue.append(contentsOf: contour)
+
+    if let startDate {
+      realSamplesAreDated = true
+      for (i, level) in contour.enumerated() {
+        realQueue.append(RealSample(date: startDate.addingTimeInterval(Double(i) * interval), level: level))
+      }
+    } else {
+      realSamplesAreDated = false
+      for level in contour {
+        realQueue.append(RealSample(date: nil, level: level))
+      }
+    }
+
     if realQueue.count > maxQueued {
       realQueue.removeFirst(realQueue.count - maxQueued)
     }
-    // After a gap, restart playout from now instead of bursting to catch up.
-    if wasIdle { nextPopAt = CACurrentMediaTime() }
+    // After a gap in undated mode, restart playout from now instead of bursting.
+    if wasIdle, !realSamplesAreDated { nextPopAt = CACurrentMediaTime() }
   }
 
   // MARK: - Per-frame update
@@ -107,9 +147,11 @@ final class AudioLevelMonitor {
   private func tick() {
     let now = CACurrentMediaTime()
 
-    // Advance the real-level queue at its native cadence.
-    if !realQueue.isEmpty, now >= nextPopAt {
-      currentRealTarget = shaped(realQueue.removeFirst())
+    if realSamplesAreDated, let playerDate = playerClock?() {
+      advanceDatedQueue(to: playerDate, now: now)
+    } else if !realQueue.isEmpty, now >= nextPopAt {
+      // Undated fallback: play out at the segment's native cadence.
+      currentRealTarget = shaped(realQueue.removeFirst().level)
       nextPopAt = now + queueInterval
       lastRealAt = now
     }
@@ -123,6 +165,25 @@ final class AudioLevelMonitor {
     let coeff = target > level ? attack : decay
     level += (target - level) * coeff
     level = min(max(level, 0), 1)
+  }
+
+  /// Picks the loudness sample matching the player's current media time, so the
+  /// orb pulses with the audio actually being heard rather than the live edge.
+  private func advanceDatedQueue(to playerDate: Date, now: CFTimeInterval) {
+    // Drop samples the player has already passed, keeping the most recent one at
+    // or before the current playback position at the head.
+    while realQueue.count > 1, let next = realQueue[1].date, next <= playerDate {
+      realQueue.removeFirst()
+    }
+    guard let head = realQueue.first, let headDate = head.date else { return }
+    // Only treat as real audio when the head actually lines up with playback;
+    // if we've run dry the head falls far behind and we ease back to ambient.
+    let lag = playerDate.timeIntervalSince(headDate)
+    syncLagMs = Int((lag * 1000).rounded())
+    if lag >= -syncTolerance, lag < syncTolerance {
+      currentRealTarget = shaped(head.level)
+      lastRealAt = now
+    }
   }
 
   /// Maps raw RMS into a livelier display range. RMS for typical program audio
