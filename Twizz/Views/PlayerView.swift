@@ -106,10 +106,11 @@ struct PlayerView: View {
   @State private var wallClockLatencySeconds: Double?
   @State private var liveEdgeLatencySeconds: Double?
   @State private var smoothedLatencySeconds: Double?
-  /// Number of consecutive settled latency samples since playback became
-  /// active. Used to suppress the misleading near-zero reading the live-edge
-  /// gap reports in the first second or two before the playhead settles.
-  @State private var latencyReadingCount = 0
+  /// Total settled latency samples since playback became active.
+  @State private var latencySampleCount = 0
+  /// Consecutive samples whose smoothed value barely moved — i.e. the reading
+  /// has stopped climbing off the live edge and looks trustworthy.
+  @State private var latencyStableCount = 0
   // The real (pre-proxy) source URL of the currently loaded item, so we can tell
   // whether a quality switch actually needs to replace the item. AVURLAsset.url
   // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
@@ -180,10 +181,16 @@ struct PlayerView: View {
   private let startupPlaybackTimeoutSeconds: Double = 14
   private let startupPlaybackPollMilliseconds: UInt64 = 500
   private let stalledPlaybackThresholdSamples = 6
-  /// Settled latency samples required before the HUD shows a number. Until
-  /// then it reads "Measuring latency…" so the early near-zero edge gap never
-  /// flashes as "~0s behind live".
-  private let latencyWarmUpSamples = 3
+  /// Warm-up gating for the latency badge. The live-edge gap reads ~0 right
+  /// after playback starts and climbs to the true value over a few seconds, so
+  /// we keep showing "Estimating latency…" until the reading settles: a couple
+  /// of consecutive stable samples above a plausible floor. The max cap means a
+  /// genuinely low-latency stream still resolves instead of estimating forever.
+  private let latencyWarmUpMinSamples = 3
+  private let latencyWarmUpMaxSamples = 10
+  private let latencyStableSamplesRequired = 2
+  private let latencyPlausibleFloorSeconds: Double = 2
+  private let latencyStableDeltaSeconds: Double = 2
   private let playbackWatchdogIntervalSeconds: Double = 2
   // Diagnostics: how much unexplained playhead movement between 1s samples counts
   // as a "jump". Catch-up rate nudges (≤1.05x) only add a fraction of a second,
@@ -1886,11 +1893,17 @@ struct PlayerView: View {
     smoothedLatencySeconds ?? rawLatencySeconds
   }
 
-  /// True while playback is active but we don't yet have enough settled samples
-  /// to trust the number (the live-edge gap reads ~0 right after playback
-  /// starts, then climbs to the real value).
+  /// True while playback is active but the latency reading hasn't settled yet.
+  /// The live-edge gap reads ~0 right after playback starts and then climbs to
+  /// the real value, so we wait for the number to stabilise (and clear a
+  /// plausible floor) before trusting it, with a hard sample cap as a backstop.
   private var isLatencyWarmingUp: Bool {
-    isPlaybackActive && latencyReadingCount < latencyWarmUpSamples
+    guard isPlaybackActive else { return false }
+    guard let seconds = measuredLatencySeconds else { return true }
+    if latencySampleCount >= latencyWarmUpMaxSamples { return false }
+    if latencySampleCount < latencyWarmUpMinSamples { return true }
+    if seconds < latencyPlausibleFloorSeconds { return true }
+    return latencyStableCount < latencyStableSamplesRequired
   }
 
   private var latencyColor: Color {
@@ -1908,7 +1921,7 @@ struct PlayerView: View {
       return "Latency unavailable"
     }
     if isLatencyWarmingUp {
-      return "Measuring latency…"
+      return "Estimating latency…"
     }
     return "~\(formatLatencySeconds(seconds)) behind live"
   }
@@ -1955,7 +1968,8 @@ struct PlayerView: View {
     wallClockLatencySeconds = nil
     liveEdgeLatencySeconds = nil
     smoothedLatencySeconds = nil
-    latencyReadingCount = 0
+    latencySampleCount = 0
+    latencyStableCount = 0
     isPlaybackActive = false
     didRequestPlayback = false
     edgeLatencyLowConfidenceStreak = 0
@@ -2058,20 +2072,29 @@ struct PlayerView: View {
   private func updateSmoothedLatency() {
     guard isPlaybackActive, let raw = rawLatencySeconds else {
       smoothedLatencySeconds = nil
-      latencyReadingCount = 0
+      latencySampleCount = 0
+      latencyStableCount = 0
       return
     }
     guard let prev = smoothedLatencySeconds else {
       smoothedLatencySeconds = raw
-      latencyReadingCount = 1
+      latencySampleCount = 1
+      latencyStableCount = 0
       return
     }
+    let next: Double
     if abs(raw - prev) >= 3 {
-      smoothedLatencySeconds = raw
+      next = raw
     } else {
-      smoothedLatencySeconds = prev * 0.6 + raw * 0.4
+      next = prev * 0.6 + raw * 0.4
     }
-    latencyReadingCount += 1
+    smoothedLatencySeconds = next
+    latencySampleCount += 1
+    if abs(next - prev) <= latencyStableDeltaSeconds {
+      latencyStableCount += 1
+    } else {
+      latencyStableCount = 0
+    }
   }
 
   private func updateLatencyMetrics() {
