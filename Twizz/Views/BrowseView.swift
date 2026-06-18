@@ -62,6 +62,7 @@ private struct BrowseCategoriesView: View {
   let onSelectCategory: (TwitchCategory) -> Void
 
   @FocusState private var focusedID: String?
+  @Namespace private var browseFocusNamespace
 
   private let columns = [
     GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 28)
@@ -101,6 +102,10 @@ private struct BrowseCategoriesView: View {
             .contentShape(RoundedRectangle(cornerRadius: 14))
             .focusable(true)
             .focused($focusedID, equals: category.id)
+            .prefersDefaultFocus(
+              category.id == service.categories.first?.id,
+              in: browseFocusNamespace
+            )
             .focusEffectDisabled()
             .onTapGesture {
               onSelectCategory(category)
@@ -112,6 +117,7 @@ private struct BrowseCategoriesView: View {
         }
         .padding(.vertical, 8)
         .focusSection()
+        .focusScope(browseFocusNamespace)
       }
       .padding(.horizontal, AppLayout.horizontalPadding)
       .padding(.bottom, 12)
