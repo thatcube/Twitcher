@@ -6,8 +6,14 @@ struct RichChatLineView: View {
     let nameColor: Color
     let globalEmoteURLs: [String: URL]
     let badgeURLs: [String: URL]
-    var textSize: ChatTextSizeOption = .medium
-    var lineHeight: ChatLineHeightOption = .normal
+    /// Body/name font point size.
+    var textSize: CGFloat = ChatAppearance.defaultTextSize
+    /// Emote glyph height (already resolved: Auto callers pass the derived value).
+    var emoteSize: CGFloat = ChatAppearance.defaultEmoteSize
+    /// Extra spacing applied within a wrapped message line.
+    var lineHeight: CGFloat = ChatAppearance.defaultLineHeight
+    /// When false, emotes render as a static first frame instead of animating.
+    var animatedEmotes: Bool = true
     /// Overrides the default white body color (used by the light side-chat).
     var bodyColorOverride: Color? = nil
 
@@ -59,43 +65,23 @@ struct RichChatLineView: View {
     }
 
     private var nameFontSize: CGFloat {
-        switch textSize {
-        case .small: return 22
-        case .medium: return 26
-        case .large: return 28
-        }
+        textSize
     }
 
     private var bodyFontSize: CGFloat {
-        switch textSize {
-        case .small: return 22
-        case .medium: return 26
-        case .large: return 28
-        }
+        textSize
     }
 
     private var badgeSize: CGFloat {
-        switch textSize {
-        case .small: return 18
-        case .medium: return 22
-        case .large: return 24
-        }
+        ChatAppearance.badgeSize(forTextSize: textSize)
     }
 
     private var rowSpacing: CGFloat {
-        switch lineHeight {
-        case .tight: return -1
-        case .normal: return 2
-        case .relaxed: return 6
-        }
+        lineHeight
     }
 
     private var emoteHeight: CGFloat {
-        switch textSize {
-        case .small: return 28
-        case .medium: return 34
-        case .large: return 36
-        }
+        emoteSize
     }
 
     var body: some View {
@@ -163,7 +149,7 @@ struct RichChatLineView: View {
                 .font(.system(size: bodyFontSize))
                 .foregroundStyle(bodyColor)
         case .emote(let name, let url):
-            EmoteView(name: name, url: url, fallbackColor: bodyColor, fallbackFontSize: bodyFontSize, emoteHeight: emoteHeight)
+            EmoteView(name: name, url: url, fallbackColor: bodyColor, fallbackFontSize: bodyFontSize, emoteHeight: emoteHeight, animated: animatedEmotes)
         }
     }
 
@@ -267,6 +253,8 @@ private struct EmoteView: View {
     let fallbackColor: Color
     let fallbackFontSize: CGFloat
     let emoteHeight: CGFloat
+    /// When false, render the emote's first frame statically (no animation).
+    var animated: Bool = true
 
     @State private var loadFailed = false
 
@@ -276,7 +264,7 @@ private struct EmoteView: View {
                 Text(name)
                     .font(.system(size: fallbackFontSize))
                     .foregroundStyle(fallbackColor)
-            } else {
+            } else if animated {
                 AnimatedImage(url: url)
                     .onFailure { _ in
                         // Defer the state mutation: SDWebImage fires this callback
@@ -291,6 +279,23 @@ private struct EmoteView: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(height: emoteHeight)
                     .fixedSize(horizontal: true, vertical: false)
+            } else {
+                // Static path: WebImage decodes only the first frame, so animated
+                // WebP/GIF emotes hold still while keeping the same layout footprint.
+                WebImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                } placeholder: {
+                    Color.clear
+                }
+                .onFailure { _ in
+                    DispatchQueue.main.async {
+                        loadFailed = true
+                    }
+                }
+                .frame(height: emoteHeight)
+                .fixedSize(horizontal: true, vertical: false)
             }
         }
     }

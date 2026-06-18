@@ -5,9 +5,11 @@ import SwiftUI
 struct ChatView: View {
     let channel: String
     let messages: [ChatMessage]
-    var textSize: ChatTextSizeOption = .medium
-    var messageSpacing: ChatLineSpacingOption = .normal
-    var lineHeight: ChatLineHeightOption = .normal
+    var textSize: CGFloat = ChatAppearance.defaultTextSize
+    var emoteSize: CGFloat = ChatAppearance.defaultEmoteSize
+    var messageSpacing: CGFloat = ChatAppearance.defaultMessageSpacing
+    var lineHeight: CGFloat = ChatAppearance.defaultLineHeight
+    var animatedEmotes: Bool = true
     var isConnected: Bool = false
     var emoteURLs: [String: URL] = [:]
     var badgeURLs: [String: URL] = [:]
@@ -26,27 +28,15 @@ struct ChatView: View {
     }
 
     private var messageSpacingValue: CGFloat {
-        switch messageSpacing {
-        case .tight: return 6
-        case .normal: return 10
-        case .relaxed: return 14
-        }
+        messageSpacing
     }
 
     private var horizontalPadding: CGFloat {
-        switch textSize {
-        case .small: return 18
-        case .medium: return 24
-        case .large: return 28
-        }
+        ChatAppearance.horizontalPadding(forTextSize: textSize)
     }
 
     private var verticalPadding: CGFloat {
-        switch messageSpacing {
-        case .tight: return 12
-        case .normal: return 16
-        case .relaxed: return 18
-        }
+        ChatAppearance.verticalPadding(forMessageSpacing: messageSpacing)
     }
 
     var body: some View {
@@ -104,7 +94,9 @@ struct ChatView: View {
             globalEmoteURLs: emoteURLs,
             badgeURLs: badgeURLs,
             textSize: textSize,
+            emoteSize: emoteSize,
             lineHeight: lineHeight,
+            animatedEmotes: animatedEmotes,
             bodyColorOverride: isSideLayout ? palette.chatSidePrimaryText : nil
         )
     }

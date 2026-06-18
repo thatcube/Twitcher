@@ -8,6 +8,7 @@ struct TwizzApp: App {
 
   init() {
     SDImageCodersManager.shared.addCoder(SDImageWebPCoder.shared)
+    ChatAppearanceMigration.runIfNeeded()
   }
 
   var body: some Scene {

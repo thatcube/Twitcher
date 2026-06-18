@@ -59,10 +59,13 @@ struct PlayerView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.themePalette) private var palette
   @AppStorage("preferredQuality") private var preferredQuality = "Auto"
-  @AppStorage("chatTextSize") private var chatTextSizeRaw = ChatTextSizeOption.medium.rawValue
-  @AppStorage("chatLineHeight") private var chatLineHeightRaw = ChatLineHeightOption.normal.rawValue
-  @AppStorage("chatLineSpacing") private var chatLineSpacingRaw = ChatLineSpacingOption.normal.rawValue
-  @AppStorage("chatWidthMode") private var chatWidthModeRaw = ChatWidthMode.medium.rawValue
+  @AppStorage("chatTextSizeValue") private var chatTextSizeValue = Double(ChatAppearance.defaultTextSize)
+  @AppStorage("chatEmoteAuto") private var chatEmoteAuto = ChatAppearance.defaultEmoteAuto
+  @AppStorage("chatEmoteSizeValue") private var chatEmoteSizeValue = Double(ChatAppearance.defaultEmoteSize)
+  @AppStorage("chatLineHeightValue") private var chatLineHeightValue = Double(ChatAppearance.defaultLineHeight)
+  @AppStorage("chatMessageSpacingValue") private var chatMessageSpacingValue = Double(ChatAppearance.defaultMessageSpacing)
+  @AppStorage("chatWidthValue") private var chatWidthValue = Double(ChatAppearance.defaultWidth)
+  @AppStorage("chatAnimatedEmotes") private var chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
   @AppStorage("chatLayoutMode") private var chatLayoutModeRaw = ChatLayoutMode.side.rawValue
   @AppStorage("chatSyncToStream") private var chatSyncToStream = false
   @AppStorage("experimentalYouTubeMergeEnabled") private var experimentalYouTubeMergeEnabled = false
@@ -92,6 +95,7 @@ struct PlayerView: View {
   @State private var resolvedQualityName: String?
   @State private var showSignInSheet = false
   @State private var showChatSettings = false
+  @State private var showChatSettingsAdvanced = false
   @State private var showControls = false
   @State private var streamTitle: String = ""
   @State private var channelDisplayName: String = ""
@@ -229,9 +233,9 @@ struct PlayerView: View {
     case simulateRaidButton
     case simulateOfflineButton
     case chatSettingsButton
-    case chatTextSizeOption(Int)
-    case chatLineHeightOption(Int)
-    case chatLineSpacingOption(Int)
+    // Main settings page
+    case chatPresetOption(Int)
+    case chatAdvancedButton
     case chatWidthOption(Int)
     case chatLayoutOption(Int)
     case chatSyncToggle
@@ -239,22 +243,52 @@ struct PlayerView: View {
     case chatDiagnosticsToggle
     case youtubeMergeToggle
     case youtubeMergeURL
+    // Advanced settings page
+    case chatAdvancedBack
+    case chatStepperDec(ChatStepperField)
+    case chatStepperInc(ChatStepperField)
+    case chatEmoteAutoToggle
+    case chatWidthSlider
+    case chatAnimatedToggle
+    case chatResetButton
   }
 
-  private var chatTextSize: ChatTextSizeOption {
-    ChatTextSizeOption(rawValue: chatTextSizeRaw) ?? .medium
+  /// The granular dimensions adjusted by the Advanced page steppers.
+  enum ChatStepperField: Hashable {
+    case text
+    case emote
+    case lineHeight
+    case messageSpacing
   }
 
-  private var chatLineHeight: ChatLineHeightOption {
-    ChatLineHeightOption(rawValue: chatLineHeightRaw) ?? .normal
+  private var chatTextSize: CGFloat {
+    CGFloat(chatTextSizeValue)
   }
 
-  private var chatLineSpacing: ChatLineSpacingOption {
-    ChatLineSpacingOption(rawValue: chatLineSpacingRaw) ?? .normal
+  private var chatLineHeight: CGFloat {
+    CGFloat(chatLineHeightValue)
   }
 
-  private var chatWidthMode: ChatWidthMode {
-    ChatWidthMode(rawValue: chatWidthModeRaw) ?? .medium
+  private var chatMessageSpacing: CGFloat {
+    CGFloat(chatMessageSpacingValue)
+  }
+
+  /// Resolved emote height: derived from the text size in Auto mode, otherwise
+  /// the explicit stored value.
+  private var chatEmoteSize: CGFloat {
+    chatEmoteAuto
+      ? ChatAppearance.autoEmoteHeight(forTextSize: chatTextSize)
+      : CGFloat(chatEmoteSizeValue)
+  }
+
+  /// The active readability preset, or `nil` when the values are "Custom".
+  private var activeChatPreset: ChatAppearancePreset? {
+    ChatAppearancePreset.resolve(
+      textSize: chatTextSize,
+      lineHeight: chatLineHeight,
+      messageSpacing: chatMessageSpacing,
+      emoteIsAuto: chatEmoteAuto
+    )
   }
 
   private var chatLayoutMode: ChatLayoutMode {
@@ -262,7 +296,7 @@ struct PlayerView: View {
   }
 
   private var chatWidth: CGFloat {
-    chatWidthMode.width
+    CGFloat(chatWidthValue)
   }
 
   private var visibleChatMessages: [ChatMessage] {
@@ -1151,9 +1185,8 @@ struct PlayerView: View {
   private func isChatSettingsFocus(_ focus: Focusable) -> Bool {
     switch focus {
     case .chatSettingsButton,
-      .chatTextSizeOption,
-      .chatLineHeightOption,
-      .chatLineSpacingOption,
+      .chatPresetOption,
+      .chatAdvancedButton,
       .chatWidthOption,
       .chatLayoutOption,
       .chatSyncToggle,
@@ -1162,7 +1195,14 @@ struct PlayerView: View {
       .simulateRaidButton,
       .simulateOfflineButton,
       .youtubeMergeToggle,
-      .youtubeMergeURL:
+      .youtubeMergeURL,
+      .chatAdvancedBack,
+      .chatStepperDec,
+      .chatStepperInc,
+      .chatEmoteAutoToggle,
+      .chatWidthSlider,
+      .chatAnimatedToggle,
+      .chatResetButton:
       return true
     default:
       return false
@@ -1177,8 +1217,10 @@ struct PlayerView: View {
         channel: channel,
         messages: visibleChatMessages,
         textSize: chatTextSize,
-        messageSpacing: chatLineSpacing,
+        emoteSize: chatEmoteSize,
+        messageSpacing: chatMessageSpacing,
         lineHeight: chatLineHeight,
+        animatedEmotes: chatAnimatedEmotes,
         isConnected: chat.isConnected,
         emoteURLs: chat.emoteURLs,
         badgeURLs: chat.badgeURLs,
@@ -1186,6 +1228,20 @@ struct PlayerView: View {
         useLighterOverlayBackground: useLighterOverlayBackground
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      // The settings panel floats to the LEFT of the chat so the whole chat
+      // stays visible while you adjust it. Anchoring the overlay to the message
+      // area (not the whole pane) makes it span the full height down to — but
+      // never overlapping — the composer bar below.
+      .overlay(alignment: .topLeading) {
+        if showChatSettings {
+          chatSettingsPanel
+            .frame(width: chatSettingsPanelWidth)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .padding(.vertical, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
+            .offset(x: -(chatSettingsPanelWidth + chatSettingsPanelGap))
+            .transition(.move(edge: .trailing).combined(with: .opacity))
+        }
+      }
 
       chatComposerBar
     }
@@ -1194,127 +1250,124 @@ struct PlayerView: View {
     // Prevent the glass container from showing a focus glow when interactive
     // elements inside (e.g. the chat input) receive focus.
     .focusEffectDisabled()
-    // Float the settings above the glass clip so the expanding panel is never
-    // cut off by the rounded glass shape.
+    // Keep the settings button pinned to the top-right of the chat. It stays put
+    // while the panel opens to the left — intentionally disconnected so the chat
+    // is never covered.
     .overlay(alignment: .topTrailing) {
-      chatSettingsFloating
+      chatSettingsButton
         .padding(.top, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
         .padding(.trailing, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
-    }
-  }
-
-  // MARK: - Floating chat settings
-
-  /// A compact settings control that floats in the top-right of the chat.
-  /// It is only reachable by pressing up from the chat input, so it never
-  /// steals focus while the user is scrolling or typing.
-  private var chatSettingsFloating: some View {
-    VStack(alignment: .trailing, spacing: 10) {
-      Button {
-        toggleChatSettings()
-      } label: {
-        Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
-          .frame(width: Icon.controlButtonSize, height: Icon.controlButtonSize)
-      }
-      .TwizzControlButtonStyle()
-      .focused($focus, equals: .chatSettingsButton)
-      .onMoveCommand { direction in
-        if direction == .down, showChatSettings {
-          let selected = ChatTextSizeOption.allCases.firstIndex(of: chatTextSize) ?? 0
-          focus = .chatTextSizeOption(selected)
-        } else if direction == .down {
-          focus = .chatInput
-        }
-      }
-
-      if showChatSettings {
-        chatSettingsPanel
-          .transition(.move(edge: .top).combined(with: .opacity))
-      }
     }
     .animation(.easeOut(duration: 0.18), value: showChatSettings)
   }
 
+  private let chatSettingsPanelWidth: CGFloat = 560
+  private let chatSettingsPanelGap: CGFloat = 16
+
+  // MARK: - Floating chat settings
+
+  /// The compact button that toggles the settings panel. It is only reachable by
+  /// pressing up from the chat input, so it never steals focus while the user is
+  /// scrolling or typing.
+  private var chatSettingsButton: some View {
+    Button {
+      toggleChatSettings()
+    } label: {
+      Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
+        .frame(width: Icon.controlButtonSize, height: Icon.controlButtonSize)
+    }
+    .TwizzControlButtonStyle()
+    .focused($focus, equals: .chatSettingsButton)
+    .onMoveCommand { direction in
+      if direction == .down, showChatSettings {
+        focus = firstChatSettingsFocus
+      } else if direction == .down {
+        focus = .chatInput
+      }
+    }
+  }
+
+  /// The focus target for the first control on whichever settings page is shown.
+  private var firstChatSettingsFocus: Focusable {
+    if showChatSettingsAdvanced {
+      return .chatAdvancedBack
+    }
+    let index = (activeChatPreset.flatMap { ChatAppearancePreset.allCases.firstIndex(of: $0) }) ?? 1
+    return .chatPresetOption(index)
+  }
+
   private var chatSettingsPanel: some View {
     ScrollView(.vertical, showsIndicators: false) {
-      VStack(alignment: .leading, spacing: 18) {
+      Group {
+        if showChatSettingsAdvanced {
+          advancedSettingsContent
+        } else {
+          mainSettingsContent
+        }
+      }
+      .padding(.vertical, 18)
+      .padding(.horizontal, 20)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 22, style: .continuous)
+        .stroke(.white.opacity(0.20), lineWidth: 1)
+    )
+    // Intentionally avoid clipShape here: tvOS focus effects can scale beyond
+    // bounds, and clipping reintroduces visibly cut-off hover/focus states.
+    .shadow(color: .black.opacity(0.30), radius: 22, x: 0, y: 10)
+    .focusSection()
+  }
+
+  // MARK: Main settings page
+
+  private var mainSettingsContent: some View {
+    VStack(alignment: .leading, spacing: 18) {
       VStack(alignment: .leading, spacing: 7) {
-        Text("Text Size")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.84))
-          .textCase(.uppercase)
+        settingsSectionHeader("Size")
 
         ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
-          ForEach(Array(ChatTextSizeOption.allCases.enumerated()), id: \.element) { index, option in
+          ForEach(Array(ChatAppearancePreset.allCases.enumerated()), id: \.element) { index, preset in
             settingsPill(
-              title: option.title,
-              isSelected: option == chatTextSize,
-              focusTag: .chatTextSizeOption(index)
+              title: preset.title,
+              isSelected: activeChatPreset == preset,
+              focusTag: .chatPresetOption(index)
             ) {
-              chatTextSizeRaw = option.rawValue
+              applyChatPreset(preset)
             }
+          }
+
+          settingsPill(
+            title: activeChatPreset == nil ? "Custom" : "Advanced",
+            isSelected: false,
+            icon: .adjustmentsHorizontal,
+            focusTag: .chatAdvancedButton
+          ) {
+            openAdvancedSettings()
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
+
+        Text("Presets adjust text, emote, line height, and spacing together. Use Advanced for fine control.")
+          .font(.caption2)
+          .foregroundStyle(.white.opacity(0.55))
+          .fixedSize(horizontal: false, vertical: true)
       }
 
       VStack(alignment: .leading, spacing: 7) {
-        Text("Line Height")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.84))
-          .textCase(.uppercase)
-
-        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
-          ForEach(Array(ChatLineHeightOption.allCases.enumerated()), id: \.element) { index, option in
-            settingsPill(
-              title: option.title,
-              isSelected: option == chatLineHeight,
-              focusTag: .chatLineHeightOption(index)
-            ) {
-              chatLineHeightRaw = option.rawValue
-            }
-          }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .focusSection()
-      }
-
-      VStack(alignment: .leading, spacing: 7) {
-        Text("Message Spacing")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.84))
-          .textCase(.uppercase)
-
-        ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
-          ForEach(Array(ChatLineSpacingOption.allCases.enumerated()), id: \.element) { index, option in
-            settingsPill(
-              title: option.title,
-              isSelected: option == chatLineSpacing,
-              focusTag: .chatLineSpacingOption(index)
-            ) {
-              chatLineSpacingRaw = option.rawValue
-            }
-          }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .focusSection()
-      }
-
-      VStack(alignment: .leading, spacing: 7) {
-        Text("Chat Width")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.84))
-          .textCase(.uppercase)
+        settingsSectionHeader("Chat Width")
 
         ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatWidthMode.allCases.enumerated()), id: \.element) { index, mode in
             settingsPill(
               title: mode.title,
-              isSelected: mode == chatWidthMode,
+              isSelected: chatWidth == mode.width,
               focusTag: .chatWidthOption(index)
             ) {
-              chatWidthModeRaw = mode.rawValue
+              chatWidthValue = Double(mode.width)
             }
           }
         }
@@ -1323,10 +1376,7 @@ struct PlayerView: View {
       }
 
       VStack(alignment: .leading, spacing: 7) {
-        Text("Chat Position")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.84))
-          .textCase(.uppercase)
+        settingsSectionHeader("Chat Position")
 
         ChatFlowLayout(itemSpacing: 8, rowSpacing: 8) {
           ForEach(Array(ChatLayoutMode.allCases.enumerated()), id: \.element) { index, mode in
@@ -1350,10 +1400,7 @@ struct PlayerView: View {
       }
 
       VStack(alignment: .leading, spacing: 7) {
-        Text("Stream Sync")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.84))
-          .textCase(.uppercase)
+        settingsSectionHeader("Stream Sync")
 
         settingsPill(
           title: chatSyncToStream ? "Synced to Stream Delay" : "Match Stream Delay",
@@ -1373,10 +1420,7 @@ struct PlayerView: View {
       .focusSection()
 
       VStack(alignment: .leading, spacing: 7) {
-        Text("Playback")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.84))
-          .textCase(.uppercase)
+        settingsSectionHeader("Playback")
 
         settingsPill(
           title: lowLatencyProxyEnabled ? "Low-Latency Mode On" : "Low-Latency Mode Off",
@@ -1435,10 +1479,7 @@ struct PlayerView: View {
       .focusSection()
 
       VStack(alignment: .leading, spacing: 7) {
-        Text("Experimental")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.84))
-          .textCase(.uppercase)
+        settingsSectionHeader("Experimental")
 
         settingsPill(
           title: "Merge with YouTube Chat",
@@ -1487,27 +1528,133 @@ struct PlayerView: View {
         }
       }
       .focusSection()
-      }
-      .padding(.vertical, 18)
-      .padding(.horizontal, 20)
-      .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .frame(width: 620)
-    .frame(maxHeight: 680)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    .overlay(
-      RoundedRectangle(cornerRadius: 22, style: .continuous)
-        .stroke(.white.opacity(0.20), lineWidth: 1)
-    )
-    // Intentionally avoid clipShape here: tvOS focus effects can scale beyond
-    // bounds, and clipping reintroduces visibly cut-off hover/focus states.
-    .shadow(color: .black.opacity(0.30), radius: 22, x: 0, y: 10)
-    .focusSection()
   }
+
+  // MARK: Advanced settings page
+
+  private var advancedSettingsContent: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      HStack(spacing: 12) {
+        Button {
+          closeAdvancedSettings()
+        } label: {
+          HStack(spacing: 6) {
+            Icon(glyph: .chevronLeft, size: 20)
+            Text("Back")
+              .font(.subheadline.weight(.semibold))
+          }
+          .padding(.horizontal, 14)
+          .padding(.vertical, 8)
+          .modifier(ChatSettingsGlassStyle(isFocused: focus == .chatAdvancedBack, isSelected: false))
+        }
+        .buttonStyle(ChatSettingsPillButtonStyle())
+        .focusEffectDisabled()
+        .focused($focus, equals: .chatAdvancedBack)
+
+        Text("Advanced")
+          .font(.headline)
+          .foregroundStyle(.white)
+
+        Spacer(minLength: 0)
+      }
+      .focusSection()
+
+      VStack(alignment: .leading, spacing: 10) {
+        settingsSectionHeader("Readability")
+
+        settingsStepperRow(.text)
+        settingsStepperRow(.lineHeight)
+        settingsStepperRow(.messageSpacing)
+      }
+
+      VStack(alignment: .leading, spacing: 10) {
+        settingsSectionHeader("Emotes")
+
+        settingsPill(
+          title: chatEmoteAuto ? "Emote Size: Auto" : "Emote Size: Custom",
+          isSelected: chatEmoteAuto,
+          focusTag: .chatEmoteAutoToggle
+        ) {
+          chatEmoteAuto.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+
+        if !chatEmoteAuto {
+          settingsStepperRow(.emote)
+        }
+
+        settingsPill(
+          title: chatAnimatedEmotes ? "Animated Emotes On" : "Animated Emotes Off",
+          isSelected: chatAnimatedEmotes,
+          focusTag: .chatAnimatedToggle
+        ) {
+          chatAnimatedEmotes.toggle()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+
+        Text(chatEmoteAuto
+          ? "Auto keeps emotes proportional to the text size."
+          : "Custom sets emote height independently of the text size.")
+          .font(.caption2)
+          .foregroundStyle(.white.opacity(0.55))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      VStack(alignment: .leading, spacing: 10) {
+        settingsSectionHeader("Chat Width")
+
+        HStack(spacing: 14) {
+          chatWidthSliderControl
+
+          Text("\(Int(chatWidth))")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(minWidth: 56, alignment: .trailing)
+            .monospacedDigit()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.06)))
+        .focusSection()
+
+        Text("Press left/right to size the chat. The preview updates live behind this panel.")
+          .font(.caption2)
+          .foregroundStyle(.white.opacity(0.55))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      Button {
+        resetChatAppearance()
+      } label: {
+        Text("Reset to Normal")
+          .font(.subheadline.weight(.semibold))
+          .padding(.horizontal, 16)
+          .padding(.vertical, 9)
+          .modifier(ChatSettingsGlassStyle(isFocused: focus == .chatResetButton, isSelected: false))
+      }
+      .buttonStyle(ChatSettingsPillButtonStyle())
+      .focusEffectDisabled()
+      .focused($focus, equals: .chatResetButton)
+      .focusSection()
+    }
+  }
+
+  private func settingsSectionHeader(_ title: String) -> some View {
+    Text(title)
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(.white.opacity(0.84))
+      .textCase(.uppercase)
+  }
+
+  // MARK: Settings controls
 
   private func settingsPill(
     title: String,
     isSelected: Bool,
+    icon: Glyph? = nil,
     focusTag: Focusable,
     action: @escaping () -> Void
   ) -> some View {
@@ -1516,7 +1663,9 @@ struct PlayerView: View {
     return Button(action: action) {
       HStack(spacing: 8) {
         if isSelected {
-          Icon(glyph: .check, size: 24)
+          Icon(glyph: .check, size: 22)
+        } else if let icon {
+          Icon(glyph: icon, size: 22)
         }
         Text(title)
           .font(.subheadline.weight(isSelected ? .semibold : .regular))
@@ -1524,44 +1673,201 @@ struct PlayerView: View {
           .truncationMode(.tail)
       }
       .padding(.horizontal, 14)
-      .padding(.vertical, 7)
-      .background(
-        RoundedRectangle(cornerRadius: 11, style: .continuous)
-          .fill(
-            .white.opacity(
-              isFocused
-                ? (isSelected ? 0.30 : 0.18)
-                : (isSelected ? 0.20 : 0.08)
-            )
-          )
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: 11, style: .continuous)
-          .stroke(
-            .white.opacity(
-              isFocused
-                ? (isSelected ? 0.78 : 0.58)
-                : (isSelected ? 0.42 : 0.18)
-            ),
-            lineWidth: 1
-          )
-      )
+      .padding(.vertical, 8)
+      .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: isSelected))
     }
-    // Keep this custom button style (instead of .plain) so tvOS focus visuals
-    // remain consistent with the rest of the player controls.
+    // Passthrough press style; the focus lift comes from ChatSettingsGlassStyle
+    // so it matches the app's liquid-glass focus treatment.
     .buttonStyle(ChatSettingsPillButtonStyle())
     .focusEffectDisabled()
     .focused($focus, equals: focusTag)
   }
 
+  private func settingsStepperRow(_ field: ChatStepperField) -> some View {
+    let config = chatStepperConfig(field)
+    let canDecrement = config.value > config.range.lowerBound
+    let canIncrement = config.value < config.range.upperBound
+
+    return HStack(spacing: 12) {
+      Text(config.title)
+        .font(.subheadline)
+        .foregroundStyle(.white)
+
+      Spacer(minLength: 12)
+
+      stepperButton(
+        rotated: false,
+        enabled: canDecrement,
+        focusTag: .chatStepperDec(field)
+      ) {
+        adjustChatStepper(field, by: -1)
+      }
+
+      Text("\(Int(config.value.rounded()))")
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.white)
+        .frame(minWidth: 44)
+        .monospacedDigit()
+
+      stepperButton(
+        rotated: true,
+        enabled: canIncrement,
+        focusTag: .chatStepperInc(field)
+      ) {
+        adjustChatStepper(field, by: 1)
+      }
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 8)
+    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.06)))
+    .focusSection()
+  }
+
+  private func stepperButton(
+    rotated: Bool,
+    enabled: Bool,
+    focusTag: Focusable,
+    action: @escaping () -> Void
+  ) -> some View {
+    let isFocused = focus == focusTag
+
+    return Button(action: action) {
+      Icon(glyph: .chevronLeft, size: 22)
+        .rotationEffect(.degrees(rotated ? 180 : 0))
+        .frame(width: 42, height: 34)
+        .modifier(ChatSettingsGlassStyle(isFocused: isFocused, isSelected: false, cornerRadius: 10))
+        .opacity(enabled ? 1.0 : 0.35)
+    }
+    .buttonStyle(ChatSettingsPillButtonStyle())
+    .focusEffectDisabled()
+    .focused($focus, equals: focusTag)
+  }
+
+  private func chatStepperConfig(
+    _ field: ChatStepperField
+  ) -> (title: String, range: ClosedRange<CGFloat>, step: CGFloat, value: CGFloat) {
+    switch field {
+    case .text:
+      return ("Text Size", ChatAppearance.textSizeRange, ChatAppearance.textSizeStep, chatTextSize)
+    case .emote:
+      return ("Emote Size", ChatAppearance.emoteSizeRange, ChatAppearance.emoteSizeStep, CGFloat(chatEmoteSizeValue))
+    case .lineHeight:
+      return ("Line Height", ChatAppearance.lineHeightRange, ChatAppearance.lineHeightStep, chatLineHeight)
+    case .messageSpacing:
+      return ("Message Spacing", ChatAppearance.messageSpacingRange, ChatAppearance.messageSpacingStep, chatMessageSpacing)
+    }
+  }
+
+  private var chatWidthSliderControl: some View {
+    let isFocused = focus == .chatWidthSlider
+    let range = ChatAppearance.widthRange
+    let span = range.upperBound - range.lowerBound
+    let fraction = max(0, min(1, (chatWidth - range.lowerBound) / span))
+    let thumb: CGFloat = isFocused ? 26 : 20
+    return GeometryReader { geo in
+      let trackWidth = geo.size.width
+      ZStack(alignment: .leading) {
+        Capsule()
+          .fill(.white.opacity(0.18))
+          .frame(height: 6)
+        Capsule()
+          .fill(.white.opacity(isFocused ? 0.95 : 0.7))
+          .frame(width: max(6, trackWidth * fraction), height: 6)
+        Circle()
+          .fill(.white)
+          .frame(width: thumb, height: thumb)
+          .shadow(color: .black.opacity(isFocused ? 0.35 : 0.0), radius: isFocused ? 8 : 0, y: isFocused ? 3 : 0)
+          .offset(x: max(0, min(trackWidth - thumb, trackWidth * fraction - thumb / 2)))
+          .animation(.easeOut(duration: 0.12), value: fraction)
+          .animation(.easeOut(duration: 0.12), value: isFocused)
+      }
+      .frame(maxHeight: .infinity)
+    }
+    .frame(height: 30)
+    .frame(maxWidth: .infinity)
+    .contentShape(Rectangle())
+    .focusable()
+    .focused($focus, equals: .chatWidthSlider)
+    .focusEffectDisabled()
+    .onMoveCommand { direction in
+      switch direction {
+      case .left: nudgeChatWidth(-1)
+      case .right: nudgeChatWidth(1)
+      case .up: focus = .chatAnimatedToggle
+      case .down: focus = .chatResetButton
+      @unknown default: break
+      }
+    }
+  }
+
+  private func nudgeChatWidth(_ direction: CGFloat) {
+    let step: CGFloat = 12
+    let range = ChatAppearance.widthRange
+    let next = min(max(CGFloat(chatWidthValue) + direction * step, range.lowerBound), range.upperBound)
+    chatWidthValue = Double(next)
+  }
+
+  private func adjustChatStepper(_ field: ChatStepperField, by direction: CGFloat) {
+    let config = chatStepperConfig(field)
+    let next = ChatAppearance.snap(
+      config.value + direction * config.step,
+      to: config.range,
+      step: config.step
+    )
+    switch field {
+    case .text:
+      chatTextSizeValue = Double(next)
+    case .emote:
+      chatEmoteAuto = false
+      chatEmoteSizeValue = Double(next)
+    case .lineHeight:
+      chatLineHeightValue = Double(next)
+    case .messageSpacing:
+      chatMessageSpacingValue = Double(next)
+    }
+  }
+
+  private func applyChatPreset(_ preset: ChatAppearancePreset) {
+    let values = preset.values
+    chatTextSizeValue = Double(values.textSize)
+    chatLineHeightValue = Double(values.lineHeight)
+    chatMessageSpacingValue = Double(values.messageSpacing)
+    chatEmoteAuto = true
+  }
+
+  private func resetChatAppearance() {
+    applyChatPreset(.normal)
+    chatEmoteSizeValue = Double(ChatAppearance.defaultEmoteSize)
+    chatWidthValue = Double(ChatAppearance.defaultWidth)
+    chatAnimatedEmotes = ChatAppearance.defaultAnimatedEmotes
+  }
+
+  private func openAdvancedSettings() {
+    showChatSettingsAdvanced = true
+    let target: Focusable = .chatAdvancedBack
+    lastChatSettingsFocus = target
+    Task { @MainActor in
+      focus = target
+    }
+  }
+
+  private func closeAdvancedSettings() {
+    showChatSettingsAdvanced = false
+    let target: Focusable = .chatAdvancedButton
+    lastChatSettingsFocus = target
+    Task { @MainActor in
+      focus = target
+    }
+  }
+
   private func toggleChatSettings() {
     showChatSettings.toggle()
     if showChatSettings {
-      let selected = ChatTextSizeOption.allCases.firstIndex(of: chatTextSize) ?? 0
-      let target: Focusable = .chatTextSizeOption(selected)
+      let target = firstChatSettingsFocus
       lastChatSettingsFocus = target
       focus = target
     } else {
+      showChatSettingsAdvanced = false
       lastChatSettingsFocus = .chatSettingsButton
       focus = .chatSettingsButton
     }
@@ -2710,6 +3016,57 @@ private struct ChatSettingsPillButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .opacity(configuration.isPressed ? 0.92 : 1.0)
+  }
+}
+
+/// The focus/selection treatment for the compact chat-settings controls. Modeled
+/// on `ChatGlassFieldStyle` (the chat input): one view subtree whose parameters
+/// change with `isFocused`/`isSelected`, so it lifts as a single Liquid Glass
+/// element — brightening (white-tinted glass), scaling slightly, and casting a
+/// soft shadow on focus — instead of swapping in an opaque card or using manual
+/// opacity stacks. Tuned more compact than the chat input to keep the efficient
+/// pill sizing. Falls back to `.ultraThinMaterial` before tvOS 26.
+private struct ChatSettingsGlassStyle: ViewModifier {
+  let isFocused: Bool
+  var isSelected: Bool = false
+  var cornerRadius: CGFloat = 11
+
+  private var shape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+  }
+
+  private var strokeOpacity: Double {
+    if isFocused { return isSelected ? 0.85 : 0.62 }
+    return isSelected ? 0.42 : 0.16
+  }
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(tvOS 26.0, *) {
+      content
+        .glassEffect(
+          isFocused
+            ? .regular.tint(.white.opacity(isSelected ? 0.45 : 0.30))
+            : (isSelected ? .regular.tint(.white.opacity(0.18)) : .regular),
+          in: shape
+        )
+        .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: 1))
+        .scaleEffect(isFocused ? 1.05 : 1.0)
+        .shadow(color: .black.opacity(isFocused ? 0.25 : 0.0),
+                radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 4 : 0)
+    } else {
+      content
+        .background(shape.fill(.ultraThinMaterial))
+        .background(
+          shape.fill(.white.opacity(
+            isFocused ? (isSelected ? 0.30 : 0.20) : (isSelected ? 0.18 : 0.08)
+          ))
+        )
+        .overlay(shape.strokeBorder(.white.opacity(strokeOpacity), lineWidth: 1))
+        .scaleEffect(isFocused ? 1.05 : 1.0)
+        .shadow(color: .black.opacity(isFocused ? 0.25 : 0.0),
+                radius: isFocused ? 10 : 0, x: 0, y: isFocused ? 4 : 0)
+    }
   }
 }
 
