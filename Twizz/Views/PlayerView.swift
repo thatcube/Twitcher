@@ -71,7 +71,13 @@ struct PlayerView: View {
   @AppStorage("showLatencyDiagnostics") private var showLatencyDiagnostics = false
 
   @State private var chat = ChatService()
+  /// Detects *outgoing* raids (the watched channel raiding away) via EventSub.
+  @State private var eventSub = EventSubService()
   @State private var player = AVPlayer()
+  /// Drives the audio-only visualizer orb. Reacts to real audio when the player
+  /// item exposes a tappable audio track (best effort on live HLS), otherwise
+  /// runs an ambient animation.
+  @State private var audioLevelMonitor = AudioLevelMonitor()
   /// Retained for the player's lifetime: `AVURLAsset` only holds its resource
   /// loader delegate weakly, so the proxy must be owned here to stay alive.
   @State private var lowLatencyProxy = LowLatencyHLSProxy(headers: PlaybackService.streamHeaders)
@@ -89,6 +95,10 @@ struct PlayerView: View {
   @State private var streamTitle: String = ""
   @State private var channelDisplayName: String = ""
   @State private var channelAvatarURL: URL?
+  @State private var channelPageTarget: ChannelPageTarget?
+  /// When the user picks a "More like this" channel from the channel page, we
+  /// stash its login and switch to it once the page cover finishes dismissing.
+  @State private var pendingSwitchLogin: String?
   @State private var chatDraft: String = ""
   @State private var chatInputActivationToken: Int = 0
   @State private var isSendingChat = false
@@ -100,7 +110,7 @@ struct PlayerView: View {
   @State private var chatSyncSendClearTask: Task<Void, Never>?
   @State private var hideTask: Task<Void, Never>?
   @State private var focusRecoveryTask: Task<Void, Never>?
-  @State private var showQualityDialog = false
+  @State private var isQualityMenuPresented = false
   @State private var latencyTask: Task<Void, Never>?
   @State private var playbackWatchdogTask: Task<Void, Never>?
   @State private var wallClockLatencySeconds: Double?
@@ -132,6 +142,10 @@ struct PlayerView: View {
   @State private var lastControlFocus: Focusable = .quality
   @State private var lastChatSettingsFocus: Focusable = .chatSettingsButton
   @State private var raidBannerDismissTask: Task<Void, Never>?
+  /// The outgoing raid currently being followed (with a cancel window).
+  @State private var outgoingRaid: OutgoingRaidEvent?
+  @State private var outgoingRaidSecondsRemaining = 0
+  @State private var outgoingRaidFollowTask: Task<Void, Never>?
 
   // MARK: Diagnostics (experimental troubleshooting overlay)
   // Counters and a rolling event log so freezes/jumps can be observed on-device
@@ -209,6 +223,8 @@ struct PlayerView: View {
   private enum Focusable: Hashable {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case chatSend
+    case raidFollowCancel
+    case simulateRaidButton
     case chatSettingsButton
     case chatTextSizeOption(Int)
     case chatLineHeightOption(Int)
@@ -220,8 +236,6 @@ struct PlayerView: View {
     case chatDiagnosticsToggle
     case youtubeMergeToggle
     case youtubeMergeURL
-    case raidFollow
-    case raidStay
   }
 
   private var chatTextSize: ChatTextSizeOption {
@@ -276,6 +290,25 @@ struct PlayerView: View {
   var body: some View {
     ZStack {
       palette.playerBackdrop.ignoresSafeArea()
+        // Attached to the backdrop (a child) rather than the root ZStack so it
+        // doesn't collide with the sign-in `.fullScreenCover` below. Two
+        // presentation modifiers on the *same* view conflict on tvOS and only
+        // one fires, which previously left the avatar button doing nothing.
+        .fullScreenCover(item: $channelPageTarget, onDismiss: { resumeAfterChannelPage() }) { target in
+          ChannelPageView(
+            target: target,
+            onWatchChannel: { channel in
+              // Tapping the live card of the channel we're already watching just
+              // resumes playback; picking a *different* channel (e.g. from the
+              // "More like this" rail) switches the player to it on dismiss.
+              if channel.login.caseInsensitiveCompare(activeChannel) != .orderedSame {
+                pendingSwitchLogin = channel.login
+              }
+              channelPageTarget = nil
+            }
+          )
+          .environment(\.themePalette, palette)
+        }
 
       if chatLayoutMode.isOverlay {
         videoColumn
@@ -308,16 +341,32 @@ struct PlayerView: View {
           .transition(.move(edge: .bottom).combined(with: .opacity))
           .zIndex(10)
       }
+
+      if let raid = outgoingRaid {
+        outgoingRaidBanner(raid)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .zIndex(11)
+      }
     }
     .onChange(of: chat.pendingRaid) { _, newRaid in
+      // Incoming raids (someone raiding the channel you're watching) are purely
+      // informational: show a passive banner and auto-dismiss it. We never steal
+      // focus or offer to "follow", because following would take you away from
+      // the channel that is actually being raided.
       guard newRaid != nil else { return }
       raidBannerDismissTask?.cancel()
       raidBannerDismissTask = Task {
-        try? await Task.sleep(for: .seconds(30))
+        try? await Task.sleep(for: .seconds(12))
         guard !Task.isCancelled else { return }
         withAnimation { chat.pendingRaid = nil }
       }
-      withAnimation { focus = .raidFollow }
+    }
+    .onChange(of: eventSub.pendingOutgoingRaid) { _, newRaid in
+      // Outgoing raids (the channel you're watching raiding someone else):
+      // mirror Twitch's native behavior and follow by default, but give a brief
+      // cancelable window first.
+      guard let newRaid else { return }
+      beginOutgoingRaidFollow(newRaid)
     }
     .task {
       if activeChannel.isEmpty { activeChannel = channel }
@@ -325,6 +374,7 @@ struct PlayerView: View {
       resetDiagnostics()
       applyExperimentalYouTubeSettings()
       chat.connect(to: activeChannel)
+      eventSub.start(forChannel: activeChannel, auth: auth)
       async let metadataTask: Void = refreshChannelMetadata()
       await load()
       _ = await metadataTask
@@ -342,10 +392,13 @@ struct PlayerView: View {
       hideTask?.cancel()
       focusRecoveryTask?.cancel()
       chatSyncSendClearTask?.cancel()
+      outgoingRaidFollowTask?.cancel()
       stopPlaybackWatchdog()
       stopLatencyMonitor()
+      audioLevelMonitor.stop()
       player.pause()
       chat.disconnect()
+      eventSub.stop()
       setIdleTimer(disabled: false)
     }
     .onExitCommand {
@@ -392,8 +445,8 @@ struct PlayerView: View {
         focusRecoveryTask?.cancel()
         lastControlFocus = newFocus
         scheduleHide()
-      } else if newFocus == nil, !showQualityDialog {
-        // tvOS can briefly drop focus to nil after system surfaces
+      } else if newFocus == nil, !isQualityMenuPresented {
+        // tvOS can briefly drop focus to nil after system surfaces (like Menu)
         // dismiss. Re-assert the last control if focus doesn't come back.
         focusRecoveryTask?.cancel()
         let target = lastControlFocus
@@ -401,7 +454,7 @@ struct PlayerView: View {
           try? await Task.sleep(for: .milliseconds(140))
           guard !Task.isCancelled else { return }
           await MainActor.run {
-            guard showControls, !showChatSettings, !showQualityDialog else { return }
+            guard showControls, !showChatSettings, !isQualityMenuPresented else { return }
             guard focus == nil else { return }
             focus = target
           }
@@ -426,10 +479,42 @@ struct PlayerView: View {
 
   // MARK: - Video + controls
 
+  /// True when the user has explicitly pinned the audio-only rendition, so the
+  /// player surface is black and the visualizer should take over.
+  private var isAudioOnlyActive: Bool {
+    guard let playback else { return false }
+    guard let audioName = playback.qualities.first(where: { $0.isAudioOnly })?.name else {
+      return false
+    }
+    return audioName == preferredQuality
+  }
+
+  /// Direct media-playlist URL for the audio-only rendition, used by the
+  /// visualizer's level decoder.
+  private var audioOnlyPlaylistURL: URL? {
+    playback?.qualities.first(where: { $0.isAudioOnly })?.url
+  }
+
   private var videoColumn: some View {
     ZStack(alignment: .bottom) {
       VideoSurface(player: player)
         .ignoresSafeArea()
+
+      if isAudioOnlyActive, !isLoading, errorMessage == nil {
+        AudioVisualizerView(
+          level: audioLevelMonitor.level,
+          avatarURL: channelAvatarURL,
+          palette: palette
+        )
+        .transition(.opacity)
+        .onAppear {
+          audioLevelMonitor.start(
+            audioPlaylistURL: audioOnlyPlaylistURL,
+            headers: PlaybackService.streamHeaders
+          )
+        }
+        .onDisappear { audioLevelMonitor.stop() }
+      }
 
       if showControls, !isLoading,
         errorMessage == nil
@@ -491,7 +576,7 @@ struct PlayerView: View {
     HStack(alignment: .top, spacing: 24) {
       HStack(alignment: .top, spacing: 12) {
         Button {
-          scheduleHide()
+          presentChannelPage()
         } label: {
           Group {
             if let channelAvatarURL {
@@ -534,6 +619,8 @@ struct PlayerView: View {
           .font(.headline)
           .foregroundStyle(.white)
           .lineLimit(2)
+          .minimumScaleFactor(0.5)
+          .truncationMode(.tail)
           .fixedSize(horizontal: false, vertical: true)
           .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -542,41 +629,52 @@ struct PlayerView: View {
       Spacer(minLength: 18)
 
       HStack(spacing: 14) {
-        // Use a native confirmation dialog with explicit presentation state so
-        // focus handoff is deterministic when opening/closing quality options.
-        Button {
-          focusRecoveryTask?.cancel()
-          lastControlFocus = .quality
-          showQualityDialog = true
-          // While the system dialog is open, let tvOS own focus entirely.
-          focus = nil
-        } label: {
-          Text(qualityButtonLabel)
-            .font(.subheadline)
-            .fontWeight(.semibold)
-            .monospacedDigit()
-            .lineLimit(1)
-            .fixedSize()
-            .accessibilityLabel("Quality, \(qualityButtonLabel)")
-        }
-        .focused($focus, equals: .quality)
-        .confirmationDialog("Quality", isPresented: $showQualityDialog, titleVisibility: .visible) {
-          ForEach(Array(qualityOptions.enumerated()), id: \.element) { index, option in
-            Button(option == preferredQuality ? "Current: \(qualityDisplayLabel(option))" : qualityDisplayLabel(option)) {
-              selectQuality(at: index)
+        // The visible menu content is kept `.equatable()` so the player's
+        // once-per-second latency churn doesn't re-render (and blink) the open
+        // menu. The focus + navigation modifiers are applied OUTSIDE that
+        // equatable boundary on purpose: `.equatable()` freezes the wrapped
+        // subtree when its inputs are unchanged, and if `.focused` lived inside
+        // it the focus binding would freeze too — so when the menu closed the
+        // focus system had no live binding to restore to and focus only snapped
+        // back on the next unrelated re-render (~1-2s later). Keeping `.focused`
+        // here keeps the binding live so focus returns to the button instantly.
+        QualityMenu(
+          options: qualityOptions,
+          selectedOption: preferredQuality,
+          buttonLabel: qualityButtonLabel,
+          reservedWidthLabels: qualityButtonLabelCandidates,
+          displayLabel: { qualityDisplayLabel($0) },
+          onSelect: { selectQuality(at: $0) },
+          onMenuPresented: {
+            focusRecoveryTask?.cancel()
+            isQualityMenuPresented = true
+            // Keep `focus == .quality` while the menu is open so tvOS keeps the
+            // button visually "lifted" (its focus shadow) behind the popup for
+            // the menu's whole lifetime, and so focus returns to it instantly
+            // on dismiss.
+          },
+          onMenuDismissed: {
+            isQualityMenuPresented = false
+            focusRecoveryTask?.cancel()
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+              focus = .quality
+            }
+            focusRecoveryTask = Task {
+              // Let close animation settle, then restore anchor focus if needed.
+              try? await Task.sleep(for: .milliseconds(40))
+              guard !Task.isCancelled else { return }
+              await MainActor.run {
+                guard showControls, !showChatSettings, !isQualityMenuPresented else { return }
+                guard focus == nil || focus == .quality else { return }
+                focus = .quality
+              }
             }
           }
-        }
-        .onChange(of: showQualityDialog) { _, isPresented in
-          if isPresented { return }
-          focusRecoveryTask?.cancel()
-          var transaction = Transaction()
-          transaction.disablesAnimations = true
-          withTransaction(transaction) {
-            focus = .quality
-          }
-          scheduleHide()
-        }
+        )
+        .equatable()
+        .focused($focus, equals: .quality)
         .onMoveCommand { direction in
           switch direction {
           case .left:
@@ -869,18 +967,59 @@ struct PlayerView: View {
       try? await Task.sleep(for: .seconds(controlsAutoHideSeconds))
       guard !Task.isCancelled else { return }
       await MainActor.run {
-        // Don't auto-hide while the quality picker is engaged. During system
-        // dialog presentation tvOS owns focus and app focus may be nil.
+        // Don't auto-hide while the quality menu is engaged. When the native
+        // Menu is open, tvOS owns focus and our FocusState reads nil, while
+        // `lastControlFocus` still points at `.quality`. In that case re-arm
+        // instead of hiding so the control bar — and the menu anchored to it —
+        // stay on screen. Normal auto-hide resumes once focus lands on another
+        // control.
         if focus == .quality || (focus == nil && lastControlFocus == .quality) {
           scheduleHide()
           return
         }
-        if showQualityDialog {
+        if isQualityMenuPresented {
           scheduleHide()
           return
         }
         hideControls()
       }
+    }
+  }
+
+  // MARK: - Channel page
+
+  /// Opens the full-screen channel page for the active channel. The live stream
+  /// is paused while the page is up, and its latency monitor + watchdog are
+  /// suspended so the non-advancing playhead isn't mistaken for a stall.
+  private func presentChannelPage() {
+    hideTask?.cancel()
+    focusRecoveryTask?.cancel()
+    stopPlaybackWatchdog()
+    stopLatencyMonitor()
+    player.pause()
+    channelPageTarget = ChannelPageTarget(
+      login: activeChannel,
+      displayName: channelDisplayName.isEmpty ? activeChannel : channelDisplayName,
+      profileImageURL: channelAvatarURL
+    )
+  }
+
+  /// Resumes live playback once the channel page is dismissed — or switches to a
+  /// different channel if the user picked one from the page's "More like this".
+  private func resumeAfterChannelPage() {
+    if let login = pendingSwitchLogin {
+      pendingSwitchLogin = nil
+      followRaid(login)
+      return
+    }
+    startPlayback()
+    startLatencyMonitor()
+    startPlaybackWatchdog()
+    if showControls {
+      focus = .streamInfo
+      scheduleHide()
+    } else {
+      focus = .video
     }
   }
 
@@ -914,6 +1053,7 @@ struct PlayerView: View {
       .chatSyncToggle,
       .chatLowLatencyToggle,
       .chatDiagnosticsToggle,
+      .simulateRaidButton,
       .youtubeMergeToggle,
       .youtubeMergeURL:
       return true
@@ -1148,6 +1288,21 @@ struct PlayerView: View {
           showLatencyDiagnostics.toggle()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+
+        if showLatencyDiagnostics {
+          // Debug-only: outgoing raids can't be triggered on demand, so this
+          // injects a simulated one (raiding to Monstercat, a near-24/7 stream)
+          // to exercise the auto-follow banner + redirect. Visible only while the
+          // Diagnostics overlay is enabled.
+          settingsPill(
+            title: "Simulate Outgoing Raid",
+            isSelected: false,
+            focusTag: .simulateRaidButton
+          ) {
+            simulateOutgoingRaid()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
 
         Text(
           "Low-Latency Mode rewrites Twitch prefetch segments to reduce delay. Diagnostics shows live render/bitrate/buffer and freeze/jump events."
@@ -1474,59 +1629,36 @@ struct PlayerView: View {
 
   // MARK: - Raid banner
 
+  /// A passive, non-interactive banner announcing an *incoming* raid (someone
+  /// raiding the channel you're watching). It deliberately has no buttons and
+  /// cannot take focus — you're already on the channel being raided, so there's
+  /// nothing to follow.
   @ViewBuilder
   private func raidBanner(_ raid: RaidEvent) -> some View {
     VStack {
       Spacer()
-      HStack(spacing: 24) {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("\(raid.displayName) is raiding!")
-            .font(.title2).bold()
-            .foregroundStyle(.white)
-          Text("\(raid.viewerCount) viewers incoming")
-            .font(.headline)
-            .foregroundStyle(.white.opacity(0.8))
-        }
-        Spacer()
-        Button {
-          withAnimation { followRaid(raid.login) }
-        } label: {
-          Text("Follow Raid")
-            .font(.headline).bold()
-            .padding(.horizontal, 28)
-            .padding(.vertical, 14)
-        }
-        .buttonStyle(.plain)
-        .background(Color.purple)
-        .clipShape(Capsule())
-        .focused($focus, equals: .raidFollow)
-
-        Button {
-          raidBannerDismissTask?.cancel()
-          withAnimation { chat.pendingRaid = nil }
-        } label: {
-          Text("Stay Here")
-            .font(.headline)
-            .padding(.horizontal, 28)
-            .padding(.vertical, 14)
-        }
-        .buttonStyle(.plain)
-        .background(.white.opacity(0.18))
-        .clipShape(Capsule())
-        .focused($focus, equals: .raidStay)
+      VStack(spacing: 4) {
+        Text("\(raid.displayName) is raiding this channel")
+          .font(.headline).bold()
+          .foregroundStyle(.white)
+        Text("\(raid.viewerCount) viewers incoming")
+          .font(.subheadline)
+          .foregroundStyle(.white.opacity(0.85))
       }
-      .padding(32)
-      .background(.black.opacity(0.75))
-      .clipShape(RoundedRectangle(cornerRadius: 20))
-      .padding(.horizontal, 60)
+      .multilineTextAlignment(.center)
+      .padding(.horizontal, 32)
+      .padding(.vertical, 18)
+      .background(.purple.opacity(0.85), in: Capsule())
       .padding(.bottom, 60)
     }
+    .allowsHitTesting(false)
     .ignoresSafeArea()
   }
 
   private func followRaid(_ login: String) {
     raidBannerDismissTask?.cancel()
     chat.pendingRaid = nil
+    clearOutgoingRaidState()
     activeChannel = login
     stopPlaybackWatchdog()
     stopLatencyMonitor()
@@ -1534,6 +1666,10 @@ struct PlayerView: View {
     player.replaceCurrentItem(with: nil)
     currentSourceURL = nil
     chat.disconnect()
+    // Restart the outgoing-raid listener for the new channel so a stale
+    // subscription from the previous channel never lingers.
+    eventSub.stop()
+    eventSub.start(forChannel: login, auth: auth)
     resetDiagnostics()
     isLoading = true
     errorMessage = nil
@@ -1547,6 +1683,91 @@ struct PlayerView: View {
       _ = await metadataTask
       focus = .video
     }
+  }
+
+  // MARK: - Outgoing raid (auto-follow)
+
+  /// Banner shown when the watched channel is raiding away. Defaults to
+  /// following after a short countdown; the focusable Cancel button opts out.
+  @ViewBuilder
+  private func outgoingRaidBanner(_ raid: OutgoingRaidEvent) -> some View {
+    VStack {
+      Spacer()
+      HStack(spacing: 20) {
+        Icon(glyph: .userPlus, size: 34)
+          .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Raiding to \(raid.toDisplayName)")
+            .font(.headline).bold()
+            .foregroundStyle(.white)
+          Text("Auto-following in \(outgoingRaidSecondsRemaining)s · Cancel to stay here")
+            .font(.subheadline)
+            .foregroundStyle(.white.opacity(0.85))
+        }
+        Button("Cancel") {
+          cancelOutgoingRaid()
+        }
+        .focused($focus, equals: .raidFollowCancel)
+      }
+      .padding(.horizontal, 36)
+      .padding(.vertical, 20)
+      .background(Color(red: 0.40, green: 0.25, blue: 0.78).opacity(0.95), in: Capsule())
+      .padding(.bottom, 60)
+    }
+    .ignoresSafeArea()
+  }
+
+  /// Start the cancelable countdown that ends in following the raid target.
+  private func beginOutgoingRaidFollow(_ raid: OutgoingRaidEvent) {
+    // Don't redirect onto the channel we're already watching.
+    guard raid.toLogin.lowercased() != activeChannel.lowercased() else {
+      eventSub.pendingOutgoingRaid = nil
+      return
+    }
+
+    outgoingRaidFollowTask?.cancel()
+    withAnimation {
+      outgoingRaid = raid
+      outgoingRaidSecondsRemaining = 6
+    }
+    focus = .raidFollowCancel
+
+    let target = raid.toLogin
+    outgoingRaidFollowTask = Task {
+      while outgoingRaidSecondsRemaining > 0 {
+        try? await Task.sleep(for: .seconds(1))
+        guard !Task.isCancelled else { return }
+        outgoingRaidSecondsRemaining -= 1
+      }
+      guard !Task.isCancelled else { return }
+      // followRaid clears outgoing state and restarts the listener.
+      followRaid(target)
+    }
+  }
+
+  private func cancelOutgoingRaid() {
+    clearOutgoingRaidState()
+    focus = .video
+  }
+
+  /// Debug-only: inject a simulated outgoing raid so the auto-follow flow can be
+  /// tested without waiting for a real raid. Targets AlveusSanctuary.
+  private func simulateOutgoingRaid() {
+    showChatSettings = false
+    eventSub.pendingOutgoingRaid = OutgoingRaidEvent(
+      toLogin: "alveussanctuary",
+      toDisplayName: "AlveusSanctuary",
+      toBroadcasterID: "",
+      viewerCount: 0
+    )
+  }
+
+  private func clearOutgoingRaidState() {
+    outgoingRaidFollowTask?.cancel()
+    outgoingRaidFollowTask = nil
+    eventSub.pendingOutgoingRaid = nil
+    withAnimation { outgoingRaid = nil }
+    outgoingRaidSecondsRemaining = 0
   }
 
   // MARK: - Quality picker
@@ -1565,6 +1786,21 @@ struct PlayerView: View {
       return "Auto"
     }
     return Self.shortQualityName(preferredQuality)
+  }
+
+  /// Every label the quality button could ever display for the current stream.
+  /// The button reserves the width of the widest of these so the in-player
+  /// title's available space stays constant as the live label changes (e.g.
+  /// "Auto" -> "Auto (1080p60)"), preventing distracting title font reflow.
+  private var qualityButtonLabelCandidates: [String] {
+    var labels: Set<String> = ["Auto"]
+    let videoVariants = (playback?.qualities ?? []).filter { !$0.isAudioOnly }
+    for quality in videoVariants {
+      let short = Self.shortQualityName(quality.name)
+      labels.insert(short)
+      labels.insert("Auto (\(short))")
+    }
+    return Array(labels)
   }
 
   /// Drops the "(Source)" suffix so the button reads "1080p60", not
@@ -2331,6 +2567,98 @@ private struct ChatGlassFieldStyle: ViewModifier {
         .shadow(color: .black.opacity(isFocused ? 0.22 : 0.18),
                 radius: isFocused ? 10 : 5, x: 0, y: isFocused ? 4 : 2)
     }
+  }
+}
+
+/// The native quality picker, extracted into its own `Equatable` view so the
+/// player's once-per-second latency/diagnostics state churn doesn't re-render
+/// (and visibly re-focus / "blink") the open `Menu`. SwiftUI only re-evaluates
+/// this view when one of the value inputs compared in `==` actually changes.
+private struct QualityMenu: View, Equatable {
+  let options: [String]
+  let selectedOption: String
+  let buttonLabel: String
+  let reservedWidthLabels: [String]
+  let displayLabel: (String) -> String
+  let onSelect: (Int) -> Void
+  let onMenuPresented: () -> Void
+  let onMenuDismissed: () -> Void
+
+  nonisolated static func == (lhs: QualityMenu, rhs: QualityMenu) -> Bool {
+    lhs.options == rhs.options
+      && lhs.selectedOption == rhs.selectedOption
+      && lhs.buttonLabel == rhs.buttonLabel
+      && lhs.reservedWidthLabels == rhs.reservedWidthLabels
+  }
+
+  /// Drives the inline `Picker` selection. Reading derives the current index
+  /// from `selectedOption`; writing routes through `onSelect` so the player
+  /// applies the quality change and its side effects.
+  private var selection: Binding<Int> {
+    Binding(
+      get: { options.firstIndex(of: selectedOption) ?? 0 },
+      set: { onSelect($0) }
+    )
+  }
+
+  var body: some View {
+    // Invisible barrier: hidden copies of every possible label reserve the
+    // width of the widest one, so the in-player title's available space stays
+    // constant. The barrier draws nothing and isn't focusable — only the Menu
+    // is interactive, and its platter hugs the live label, so the visible
+    // button stays variable-width. Trailing alignment parks the button against
+    // the next control, letting the reserved slack sit (invisibly) on its left.
+    ZStack(alignment: .trailing) {
+      ForEach(reservedWidthLabels, id: \.self) { candidate in
+        qualityLabelText(candidate).hidden()
+      }
+
+      Menu {
+        // A `Picker` is Apple's recommended single-selection control inside a
+        // menu: it renders a checkmark in a reserved leading gutter so every
+        // row's text stays aligned (no per-row shift), unlike hand-placed
+        // checkmark labels.
+        Picker("Quality", selection: selection) {
+          ForEach(Array(options.enumerated()), id: \.element) { index, option in
+            Text(displayLabel(option)).tag(index)
+          }
+        }
+        .pickerStyle(.inline)
+        .onAppear(perform: onMenuPresented)
+        .onDisappear(perform: onMenuDismissed)
+      } label: {
+        qualityLabelText(buttonLabel)
+          .accessibilityLabel("Quality, \(buttonLabel)")
+      }
+    }
+  }
+
+  /// `true` for the live "Auto (1080p60)" form, which we render slightly
+  /// smaller so the parenthetical resolution reads as a secondary detail.
+  private func isAutoResolutionLabel(_ text: String) -> Bool {
+    text.hasPrefix("Auto (")
+  }
+
+  @ViewBuilder
+  private func qualityLabelText(_ text: String) -> some View {
+    Group {
+      if isAutoResolutionLabel(text) {
+        Text(text)
+          .font(.system(size: Self.compactQualityFontSize, weight: .semibold))
+      } else {
+        Text(text)
+          .font(.subheadline)
+          .fontWeight(.semibold)
+      }
+    }
+    .monospacedDigit()
+    .lineLimit(1)
+    .fixedSize()
+  }
+
+  /// 20% smaller than `.subheadline`, used for the "Auto (1080p60)" label.
+  private static var compactQualityFontSize: CGFloat {
+    UIFont.preferredFont(forTextStyle: .subheadline).pointSize * 0.8
   }
 }
 
