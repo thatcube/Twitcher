@@ -145,10 +145,28 @@ actor AudioOnlyLevelDecoder {
 
   /// Decodes a single self-contained media segment into an RMS loudness contour.
   private func decodeRMSContour(from data: Data, fallbackDuration: Double) async throws -> [Double] {
-    let ext = Self.containerExtension(for: data)
+    let sniffed = Self.containerExtension(for: data)
+
+    // AVFoundation can't read tracks from a raw MPEG-TS file, but it *can* read a
+    // raw ADTS `.aac` file. Twitch's audio-only segments are AAC inside MPEG-TS,
+    // so when we see a `.ts` we demux the AAC elementary stream out first.
+    let decodable: Data
+    let ext: String
+    if sniffed == "ts" {
+      guard let adts = TSAudioExtractor.extractADTS(from: data), !adts.isEmpty else {
+        log.info("Could not extract AAC from MPEG-TS segment; staying on ambient.")
+        return []
+      }
+      decodable = adts
+      ext = "aac"
+    } else {
+      decodable = data
+      ext = sniffed
+    }
+
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("twizz-audio-\(UUID().uuidString).\(ext)")
-    try data.write(to: tempURL)
+    try decodable.write(to: tempURL)
     defer { try? FileManager.default.removeItem(at: tempURL) }
 
     let asset = AVURLAsset(url: tempURL)
@@ -270,5 +288,122 @@ actor AudioOnlyLevelDecoder {
       }
     }
     return "ts"
+  }
+}
+
+/// Minimal MPEG-TS demuxer that pulls the AAC (ADTS) audio elementary stream out
+/// of a Twitch `.ts` segment.
+///
+/// AVFoundation refuses to expose tracks from a raw MPEG-TS file, but it happily
+/// decodes a raw ADTS `.aac` file. Twitch carries AAC audio (stream type 0x0F,
+/// already ADTS-framed) inside its transport stream, so concatenating the audio
+/// PID's PES payloads yields a valid `.aac` file we can hand to AVAssetReader.
+private enum TSAudioExtractor {
+  private static let packetSize = 188
+
+  static func extractADTS(from data: Data) -> Data? {
+    guard data.count >= packetSize else { return nil }
+
+    var pmtPID: Int?
+    var audioPID: Int?
+    var es = Data()
+    es.reserveCapacity(data.count / 2)
+
+    data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+      guard let base = raw.baseAddress else { return }
+      let bytes = base.assumingMemoryBound(to: UInt8.self)
+      let count = raw.count
+
+      // Find the first TS sync byte (segments occasionally carry a few stray
+      // leading bytes).
+      var offset = 0
+      while offset + packetSize <= count, bytes[offset] != 0x47 { offset += 1 }
+
+      while offset + packetSize <= count {
+        let packetEnd = offset + packetSize
+        guard bytes[offset] == 0x47 else { offset += 1; continue }
+
+        let b1 = bytes[offset + 1]
+        let b2 = bytes[offset + 2]
+        let b3 = bytes[offset + 3]
+        let payloadStart = (b1 & 0x40) != 0
+        let pid = (Int(b1 & 0x1F) << 8) | Int(b2)
+        let adaptation = (b3 & 0x30) >> 4
+
+        var p = offset + 4
+        if adaptation == 2 { offset += packetSize; continue }  // adaptation only
+        if adaptation == 3 {                                   // adaptation + payload
+          let afLen = Int(bytes[p])
+          p += 1 + afLen
+        }
+        guard p < packetEnd else { offset += packetSize; continue }
+
+        if pid == 0 {
+          parsePAT(bytes, p: p, packetEnd: packetEnd, payloadStart: payloadStart, pmtPID: &pmtPID)
+        } else if let pmt = pmtPID, pid == pmt, audioPID == nil {
+          parsePMT(bytes, p: p, packetEnd: packetEnd, payloadStart: payloadStart, audioPID: &audioPID)
+        } else if let apid = audioPID, pid == apid {
+          var q = p
+          if payloadStart, q + 9 <= packetEnd,
+            bytes[q] == 0x00, bytes[q + 1] == 0x00, bytes[q + 2] == 0x01
+          {
+            let pesHeaderDataLength = Int(bytes[q + 8])
+            q = q + 9 + pesHeaderDataLength
+          }
+          if q < packetEnd {
+            es.append(UnsafeBufferPointer(start: bytes + q, count: packetEnd - q))
+          }
+        }
+
+        offset += packetSize
+      }
+    }
+
+    return es.isEmpty ? nil : es
+  }
+
+  private static func parsePAT(
+    _ bytes: UnsafePointer<UInt8>, p: Int, packetEnd: Int,
+    payloadStart: Bool, pmtPID: inout Int?
+  ) {
+    var q = p
+    if payloadStart { q += 1 + Int(bytes[q]) }  // skip pointer_field
+    guard q + 8 <= packetEnd else { return }
+    let sectionLength = (Int(bytes[q + 1] & 0x0F) << 8) | Int(bytes[q + 2])
+    let sectionStart = q + 3
+    let sectionEnd = min(sectionStart + sectionLength - 4, packetEnd)
+    var e = sectionStart + 5  // skip transport_stream_id, version, section numbers
+    while e + 4 <= sectionEnd {
+      let programNumber = (Int(bytes[e]) << 8) | Int(bytes[e + 1])
+      let pid = (Int(bytes[e + 2] & 0x1F) << 8) | Int(bytes[e + 3])
+      if programNumber != 0 { pmtPID = pid }
+      e += 4
+    }
+  }
+
+  private static func parsePMT(
+    _ bytes: UnsafePointer<UInt8>, p: Int, packetEnd: Int,
+    payloadStart: Bool, audioPID: inout Int?
+  ) {
+    var q = p
+    if payloadStart { q += 1 + Int(bytes[q]) }  // skip pointer_field
+    guard q + 12 <= packetEnd else { return }
+    let sectionLength = (Int(bytes[q + 1] & 0x0F) << 8) | Int(bytes[q + 2])
+    let sectionStart = q + 3
+    let sectionEnd = min(sectionStart + sectionLength - 4, packetEnd)
+    guard sectionStart + 9 <= packetEnd else { return }
+    let programInfoLength = (Int(bytes[sectionStart + 7] & 0x0F) << 8) | Int(bytes[sectionStart + 8])
+    var e = sectionStart + 9 + programInfoLength
+    while e + 5 <= sectionEnd {
+      let streamType = bytes[e]
+      let pid = (Int(bytes[e + 1] & 0x1F) << 8) | Int(bytes[e + 2])
+      let esInfoLength = (Int(bytes[e + 3] & 0x0F) << 8) | Int(bytes[e + 4])
+      // 0x0F = ADTS AAC, 0x11 = LATM AAC, 0x03/0x04 = MPEG audio.
+      if streamType == 0x0F || streamType == 0x03 || streamType == 0x04 {
+        audioPID = pid
+        return
+      }
+      e += 5 + esInfoLength
+    }
   }
 }

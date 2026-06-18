@@ -114,26 +114,26 @@ struct AudioVisualizerView: View {
   // MARK: - Sonar-style ripple rings
 
   private func rippleRings(diameter: CGFloat, amp: Double, t: Double) -> some View {
-    let ringCount = 4
-    // Rings emanate faster and reach further when the audio is loud.
-    let speed = 0.28 + amp * 0.55
+    let ringCount = 3
+    // Calm, slow concentric ripples that lift a little when the audio is loud.
+    let speed = 0.11 + amp * 0.14
     return ZStack {
       ForEach(0..<ringCount, id: \.self) { i in
         let phase = ((t * speed) + Double(i) / Double(ringCount))
           .truncatingRemainder(dividingBy: 1.0)
-        let ringDiameter = diameter * (1.0 + phase * (0.7 + amp * 1.1))
+        let ringDiameter = diameter * (1.0 + phase * (0.5 + amp * 0.7))
         let fade = (1.0 - phase)
         Circle()
           .stroke(
             LinearGradient(
-              colors: [accentA.opacity(1.0), accentB.opacity(0.7)],
+              colors: [accentA.opacity(0.85), accentB.opacity(0.6)],
               startPoint: .topLeading,
               endPoint: .bottomTrailing
             ),
-            lineWidth: 1.5 + fade * (2.0 + amp * 6.0)
+            lineWidth: 1.5 + fade * (1.5 + amp * 3.5)
           )
           .frame(width: ringDiameter, height: ringDiameter)
-          .opacity(fade * (0.05 + amp * 0.95))
+          .opacity(fade * (0.04 + amp * 0.7))
       }
     }
   }
@@ -190,13 +190,13 @@ struct AudioVisualizerView: View {
     }
     .frame(width: diameter, height: diameter)
     .modifier(LiquidGlassOrbRim(diameter: diameter))
-    .shadow(color: accentB.opacity(0.3 + amp * 0.7), radius: 24 + amp * 70)
+    .shadow(color: accentB.opacity(0.25 + amp * 0.55), radius: 24 + amp * 55)
     .overlay(
-      // A bright reactive rim that flares on transients.
+      // A soft accent rim that brightens with the audio (no harsh flicker).
       Circle()
-        .stroke(.white.opacity(amp * 0.7), lineWidth: 1 + amp * 5)
+        .stroke(accentB.opacity(amp * 0.5), lineWidth: 2 + amp * 4)
         .frame(width: diameter, height: diameter)
-        .blur(radius: 3)
+        .blur(radius: 8)
     )
   }
 
