@@ -20,6 +20,8 @@ struct HomeView: View {
   @State private var recommendations = RecommendationsService()
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
+  @State private var channelPageTarget: ChannelPageTarget?
+  @State private var pendingWatchChannel: FollowedChannel?
   @State private var pendingBrowseCategory: TwitchCategory?
   @State private var browsePath: [TwitchCategory] = []
   @State private var firstFocusRequested = false
@@ -47,17 +49,23 @@ struct HomeView: View {
   enum SidebarTab: String, CaseIterable, Identifiable {
     case home = "Home"
     case browse = "Browse"
+    case search = "Search"
     case settings = "Settings"
 
     var id: String { rawValue }
 
-    var systemImage: String {
+    var glyph: Glyph {
       switch self {
-      case .home: return "house"
-      case .browse: return "square.grid.2x2"
-      case .settings: return "gearshape"
+      case .home: return .home
+      case .browse: return .layoutGrid
+      case .search: return .search
+      case .settings: return .settings
       }
     }
+
+    /// Asset-catalog name for the vendored Tabler template image, so tab items
+    /// use the same icon library as the rest of the app.
+    var tablerImageName: String { "tb-\(glyph.rawValue)" }
   }
 
   private struct ChannelRailMetrics {
@@ -71,20 +79,37 @@ struct HomeView: View {
       tabContainer { homeTab }
         .tag(SidebarTab.home)
         .tabItem {
-          Label(SidebarTab.home.rawValue, systemImage: SidebarTab.home.systemImage)
+          Label(SidebarTab.home.rawValue, image: SidebarTab.home.tablerImageName)
         }
 
       tabContainer {
         BrowseView(
           auth: auth,
           selectedChannel: $selectedChannel,
+          channelPageTarget: $channelPageTarget,
           pendingCategory: $pendingBrowseCategory,
           path: $browsePath
         )
       }
       .tag(SidebarTab.browse)
       .tabItem {
-        Label(SidebarTab.browse.rawValue, systemImage: SidebarTab.browse.systemImage)
+        Label(SidebarTab.browse.rawValue, image: SidebarTab.browse.tablerImageName)
+      }
+
+      tabContainer {
+        SearchView(
+          auth: auth,
+          selectedChannel: $selectedChannel,
+          channelPageTarget: $channelPageTarget,
+          onSelectCategory: { category in
+            pendingBrowseCategory = category
+            selectedSidebarTab = .browse
+          }
+        )
+      }
+      .tag(SidebarTab.search)
+      .tabItem {
+        Label(SidebarTab.search.rawValue, image: SidebarTab.search.tablerImageName)
       }
 
       tabContainer {
@@ -103,18 +128,11 @@ struct HomeView: View {
       }
       .tag(SidebarTab.settings)
       .tabItem {
-        Label(SidebarTab.settings.rawValue, systemImage: SidebarTab.settings.systemImage)
+        Label(SidebarTab.settings.rawValue, image: SidebarTab.settings.tablerImageName)
       }
     }
-    .tabViewStyle(.sidebarAdaptable)
-    .background(
-      LinearGradient(
-        colors: resolvedPalette.backgroundColors,
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
-    )
+    .tabViewStyle(.automatic)
+    .background(AppBackground(palette: resolvedPalette))
     .environment(\.themePalette, resolvedPalette)
     .preferredColorScheme(themeManager.theme.preferredColorScheme)
     .task {
@@ -154,6 +172,17 @@ struct HomeView: View {
       PlayerView(channel: channel.login, auth: auth)
         .environment(\.themePalette, resolvedPalette)
     }
+    .fullScreenCover(item: $channelPageTarget, onDismiss: { presentPendingWatchIfNeeded() }) { target in
+      ChannelPageView(
+        target: target,
+        onWatchChannel: { channel in
+          pendingWatchChannel = channel
+          channelPageTarget = nil
+        }
+      )
+      .environment(\.themePalette, resolvedPalette)
+      .preferredColorScheme(themeManager.theme.preferredColorScheme)
+    }
     .fullScreenCover(isPresented: $showSignIn) {
       SignInView(auth: auth) {
         Task {
@@ -169,12 +198,7 @@ struct HomeView: View {
   @ViewBuilder
   private func tabContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
     ZStack {
-      LinearGradient(
-        colors: resolvedPalette.backgroundColors,
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
+      AppBackground(palette: resolvedPalette)
 
       content()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -189,7 +213,7 @@ struct HomeView: View {
       )
 
       ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: 40) {
+        VStack(alignment: .leading, spacing: 72) {
           followingSection(rail: rail)
           recommendedChannelsSection(rail: rail)
           recommendedCategoriesSection(rail: rail)
@@ -251,7 +275,9 @@ struct HomeView: View {
                 cardCornerRadius: cardCornerRadius,
                 mediaCornerRadius: mediaCornerRadius
               ),
-              showsGameName: true
+              showsGameName: true,
+              onWatch: { selectedChannel = $0 },
+              onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
             )
             .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
             .focusable(true)
@@ -314,7 +340,9 @@ struct HomeView: View {
                   cardCornerRadius: cardCornerRadius,
                   mediaCornerRadius: mediaCornerRadius
                 ),
-                showsGameName: true
+                showsGameName: true,
+                onWatch: { selectedChannel = $0 },
+                onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
               )
               .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
               .focusable(true)
@@ -533,6 +561,16 @@ struct HomeView: View {
     )
 
     deepLinkRouter.pendingChannelLogin = nil
+  }
+
+  /// After the channel page is dismissed via a "Watch Live" button (this channel
+  /// or a "More like this" pick), start playback for that channel. Runs from the
+  /// cover's `onDismiss` so the player cover presents cleanly after the
+  /// channel-page cover has fully gone away.
+  private func presentPendingWatchIfNeeded() {
+    guard let channel = pendingWatchChannel else { return }
+    pendingWatchChannel = nil
+    selectedChannel = channel
   }
 
   private func shouldAutoRefreshFollowedChannels() -> Bool {

@@ -65,12 +65,35 @@ targets:
     platform: tvOS
     sources:
       - path: TopShelfExtension/ContentProvider.swift
+      - path: TopShelfExtension/TopShelfLiveFeed.swift
       - path: Twizz/Shared/TopShelfSnapshot.swift
       - path: Twizz/Shared/TopShelfStore.swift
+      - path: Twizz/Shared/TopShelfCredentialStore.swift
+    postBuildScripts:
+      - name: Set build number from git commit count
+        basedOnDependencyAnalysis: false
+        script: |
+          # Keep the extension's CFBundleVersion in lockstep with the app's.
+          # tvOS refuses to load an app extension whose CFBundleVersion does
+          # not match its containing app, which leaves the Top Shelf empty.
+          set -e
+          buildNumber=$(git -C "$SRCROOT" rev-list --count HEAD 2>/dev/null || echo 1)
+          plist="${BUILT_PRODUCTS_DIR}/${INFOPLIST_PATH}"
+          if [ -f "$plist" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $buildNumber" "$plist"
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Twizz.TopShelfExtension
         DEVELOPMENT_TEAM: N8Z5T4AK3X
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: TopShelfExtension/Info.plist
+        # tvOS's legacy TVExtensionMain entry point (set by the
+        # com.apple.product-type.tv-app-extension product type) is a no-op stub
+        # in modern tvOS — it simply returns, so the extension process launched
+        # and exited immediately without ever instantiating the principal class,
+        # leaving the Top Shelf empty. Modern Top Shelf extensions must enter
+        # through NSExtensionMain (provided by Foundation), which sets up the
+        # ExtensionKit/XPC runtime and instantiates ContentProvider.
+        LD_ENTRY_POINT: _NSExtensionMain
         CODE_SIGN_ENTITLEMENTS: TopShelfExtension/TopShelfExtension.entitlements

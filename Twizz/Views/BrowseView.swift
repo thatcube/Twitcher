@@ -5,6 +5,7 @@ import SwiftUI
 struct BrowseView: View {
   let auth: TwitchAuthSession
   @Binding var selectedChannel: FollowedChannel?
+  @Binding var channelPageTarget: ChannelPageTarget?
   @Binding var pendingCategory: TwitchCategory?
   @Binding var path: [TwitchCategory]
 
@@ -35,7 +36,8 @@ struct BrowseView: View {
         BrowseStreamsView(
           category: category,
           service: service,
-          selectedChannel: $selectedChannel
+          selectedChannel: $selectedChannel,
+          channelPageTarget: $channelPageTarget
         )
         .task(id: category.id) {
           await service.loadStreams(for: category)
@@ -60,6 +62,7 @@ private struct BrowseCategoriesView: View {
   let onSelectCategory: (TwitchCategory) -> Void
 
   @FocusState private var focusedID: String?
+  @Namespace private var browseFocusNamespace
 
   private let columns = [
     GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 28)
@@ -99,6 +102,10 @@ private struct BrowseCategoriesView: View {
             .contentShape(RoundedRectangle(cornerRadius: 14))
             .focusable(true)
             .focused($focusedID, equals: category.id)
+            .prefersDefaultFocus(
+              category.id == service.categories.first?.id,
+              in: browseFocusNamespace
+            )
             .focusEffectDisabled()
             .onTapGesture {
               onSelectCategory(category)
@@ -110,26 +117,10 @@ private struct BrowseCategoriesView: View {
         }
         .padding(.vertical, 8)
         .focusSection()
+        .focusScope(browseFocusNamespace)
       }
       .padding(.horizontal, AppLayout.horizontalPadding)
       .padding(.bottom, 12)
-    }
-    .onAppear {
-      guard focusedID == nil, let first = service.categories.first else { return }
-      Task {
-        try? await Task.sleep(for: .milliseconds(150))
-        await MainActor.run { focusedID = first.id }
-      }
-    }
-    .onChange(of: service.categories) { _, categories in
-      guard let first = categories.first else { return }
-      if let focusedID, categories.contains(where: { $0.id == focusedID }) {
-        return
-      }
-      Task {
-        try? await Task.sleep(for: .milliseconds(150))
-        await MainActor.run { focusedID = first.id }
-      }
     }
   }
 }
@@ -140,6 +131,7 @@ private struct BrowseStreamsView: View {
   let category: TwitchCategory
   let service: BrowseService
   @Binding var selectedChannel: FollowedChannel?
+  @Binding var channelPageTarget: ChannelPageTarget?
 
   @Environment(\.dismiss) private var dismiss
   @FocusState private var focusedStreamID: String?
@@ -223,7 +215,9 @@ private struct BrowseStreamsView: View {
                 let isFocused = focusedStreamID == channel.id
                 StreamChannelCard(
                   channel: channel,
-                  isFocused: isFocused
+                  isFocused: isFocused,
+                  onWatch: { selectedChannel = $0 },
+                  onGoToChannel: { channelPageTarget = ChannelPageTarget(channel: $0) }
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 16))
                 .focusable(true)

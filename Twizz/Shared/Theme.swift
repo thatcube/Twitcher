@@ -48,10 +48,10 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
   }
 
   /// Resolves the concrete palette. When set to `.system`, the device's current
-  /// scheme decides between the OLED (dark side) and Light palettes.
+  /// scheme decides between the Dark (dark side) and Light palettes.
   func palette(systemColorScheme: ColorScheme) -> ThemePalette {
     switch self {
-    case .system: return systemColorScheme == .dark ? .oled : .light
+    case .system: return systemColorScheme == .dark ? .dark : .light
     case .dark: return .dark
     case .oled: return .oled
     case .light: return .light
@@ -98,6 +98,9 @@ struct ThemePalette: Equatable {
   let chatSideSurface: Color
   /// Primary message text on the side-layout chat panel.
   let chatSidePrimaryText: Color
+  /// Optional brand-purple glow painted at the top-center of the app
+  /// background. `nil` disables it (e.g. OLED stays pure black).
+  let topGlow: Color?
 
   static let oled = ThemePalette(
     backgroundColors: [.black, .black],
@@ -106,7 +109,8 @@ struct ThemePalette: Equatable {
     liftSecondaryText: .black.opacity(0.62),
     playerBackdrop: .black,
     chatSideSurface: Color(white: 0.07).opacity(0.96),
-    chatSidePrimaryText: .white
+    chatSidePrimaryText: .white,
+    topGlow: nil
   )
 
   static let dark = ThemePalette(
@@ -119,7 +123,8 @@ struct ThemePalette: Equatable {
     liftSecondaryText: .black.opacity(0.62),
     playerBackdrop: .black,
     chatSideSurface: Color(white: 0.07).opacity(0.96),
-    chatSidePrimaryText: .white
+    chatSidePrimaryText: .white,
+    topGlow: ThemePalette.brandPurple.opacity(0.075)
   )
 
   static let light = ThemePalette(
@@ -132,8 +137,40 @@ struct ThemePalette: Equatable {
     liftSecondaryText: .white.opacity(0.70),
     playerBackdrop: Color(red: 0.90, green: 0.90, blue: 0.92),
     chatSideSurface: Color(white: 0.97).opacity(0.98),
-    chatSidePrimaryText: Color(white: 0.12)
+    chatSidePrimaryText: Color(white: 0.12),
+    topGlow: ThemePalette.brandPurple.opacity(0.05)
   )
+
+  /// Twitch brand purple (#9146FF).
+  static let brandPurple = Color(red: 0.569, green: 0.275, blue: 1.0)
+}
+
+// MARK: - App background
+
+/// The shared app background: a vertical base gradient with an optional,
+/// very subtle brand-purple glow blooming from the top-center. The glow is
+/// driven by `ThemePalette.topGlow`, so OLED (nil) renders pure black.
+struct AppBackground: View {
+  let palette: ThemePalette
+
+  var body: some View {
+    LinearGradient(
+      colors: palette.backgroundColors,
+      startPoint: .top,
+      endPoint: .bottom
+    )
+    .overlay(alignment: .top) {
+      if let glow = palette.topGlow {
+        RadialGradient(
+          gradient: Gradient(colors: [glow, .clear]),
+          center: .top,
+          startRadius: 0,
+          endRadius: 820
+        )
+      }
+    }
+    .ignoresSafeArea()
+  }
 }
 
 // MARK: - Environment plumbing
