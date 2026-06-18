@@ -28,7 +28,7 @@ struct SettingsView: View {
   @AppStorage(RecommendationPreferences.enabledDefaultsKey) private var personalizedRecommendationsEnabled = true
   @AppStorage(StreamLanguagePreference.storageKey) private var streamLanguage = StreamLanguagePreference.deviceDefault()
 
-  private let labelColumnWidth: CGFloat = 560
+  private let labelColumnWidth: CGFloat = 420
 
   var body: some View {
     ZStack {
@@ -114,7 +114,7 @@ struct SettingsView: View {
   private var streamCardRow: some View {
     settingRow(
       title: "Stream Cards",
-      subtitle: "How large stream cards appear on Home and Browse."
+      subtitle: "Card size on Home and Browse."
     ) {
       ForEach(StreamCardSize.allCases) { size in
         Button {
@@ -135,7 +135,7 @@ struct SettingsView: View {
   private var chatRow: some View {
     settingRow(
       title: "Chat",
-      subtitle: "Show chat automatically when you open a stream."
+      subtitle: "Show chat when a stream opens."
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {
@@ -151,7 +151,7 @@ struct SettingsView: View {
   private var languageRow: some View {
     settingRow(
       title: "Stream Language",
-      subtitle: "Only show live streams broadcast in this language across Home and recommendations."
+      subtitle: "Only show streams in this language."
     ) {
       Menu {
         ForEach(StreamLanguagePreference.options, id: \.value) { option in
@@ -175,8 +175,7 @@ struct SettingsView: View {
   private var recommendationsRow: some View {
     settingRow(
       title: "Recommendations",
-      subtitle:
-        "Suggest live channels similar to the ones you follow and watch. Your watch history stays on this Apple TV and is never shared."
+      subtitle: "Based on who you follow and watch. History stays on this Apple TV."
     ) {
       ForEach([true, false], id: \.self) { on in
         Button {
@@ -497,10 +496,14 @@ private struct SettingPill: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(title)
           .font(.headline)
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
         if let subtitle {
           Text(subtitle)
             .font(.caption2)
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
         }
       }
 
