@@ -1834,10 +1834,19 @@ struct PlayerView: View {
     }
     .padding(.horizontal, 22)
     .padding(.vertical, 8)
-    // A subtle non-glass grouping fill: this row is a static container holding a
-    // glass +/- control, so it must NOT be glass itself (glass-on-glass is what
-    // made the controls look flat). The native glass steppers pop against it.
-    .background(Capsule(style: .continuous).fill(.white.opacity(0.06)))
+    // A recessed "well" rather than a raised fill: this row is a static container
+    // holding glass +/- controls, so it must NOT be glass itself (glass-on-glass
+    // is what made the controls look flat). A darkened track reads as recessed and
+    // lets the brighter native glass steppers sit *in* it, instead of a light fill
+    // that paradoxically looked lighter than its own dark buttons.
+    .background(
+      Capsule(style: .continuous)
+        .fill(.black.opacity(0.22))
+        .overlay(
+          Capsule(style: .continuous)
+            .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+        )
+    )
     .focusSection()
   }
 
@@ -3102,13 +3111,19 @@ extension View {
   fileprivate func chatSettingsGlassButton(isSelected: Bool = false) -> some View {
     if #available(tvOS 26.0, *) {
       if isSelected {
+        // Native "active" state: the prominent glass style tinted with the app's
+        // brand color. `.glassProminent` alone uses the default accent (the app
+        // ships no AccentColor asset), which reads weakly; the tint makes the
+        // selected option unmistakably "on" while staying fully native.
         self.buttonStyle(.glassProminent)
+          .tint(ThemePalette.brandPurple)
       } else {
         self.buttonStyle(.glass)
       }
     } else {
       if isSelected {
         self.buttonStyle(.borderedProminent)
+          .tint(ThemePalette.brandPurple)
       } else {
         self.buttonStyle(.bordered)
       }
