@@ -21,7 +21,7 @@ struct HomeView: View {
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
-  @State private var pendingWatchLogin: String?
+  @State private var pendingWatchChannel: FollowedChannel?
   @State private var pendingBrowseCategory: TwitchCategory?
   @State private var browsePath: [TwitchCategory] = []
   @State private var firstFocusRequested = false
@@ -160,8 +160,8 @@ struct HomeView: View {
     .fullScreenCover(item: $channelPageTarget, onDismiss: { presentPendingWatchIfNeeded() }) { target in
       ChannelPageView(
         target: target,
-        onWatch: {
-          pendingWatchLogin = target.login
+        onWatchChannel: { channel in
+          pendingWatchChannel = channel
           channelPageTarget = nil
         }
       )
@@ -553,28 +553,14 @@ struct HomeView: View {
     deepLinkRouter.pendingChannelLogin = nil
   }
 
-  /// After the channel page is dismissed via its "Watch Live" button, start
-  /// playback for that channel. Runs from the cover's `onDismiss` so the player
-  /// cover presents cleanly after the channel-page cover has fully gone away.
+  /// After the channel page is dismissed via a "Watch Live" button (this channel
+  /// or a "More like this" pick), start playback for that channel. Runs from the
+  /// cover's `onDismiss` so the player cover presents cleanly after the
+  /// channel-page cover has fully gone away.
   private func presentPendingWatchIfNeeded() {
-    guard let login = pendingWatchLogin else { return }
-    pendingWatchLogin = nil
-
-    let match = (follows.channels + recommendations.channels).first {
-      $0.login.caseInsensitiveCompare(login) == .orderedSame
-    }
-
-    selectedChannel = match ?? FollowedChannel(
-      id: login,
-      login: login,
-      displayName: login,
-      title: "",
-      gameName: "",
-      viewerCount: nil,
-      thumbnailURL: nil,
-      profileImageURL: nil,
-      isLive: true
-    )
+    guard let channel = pendingWatchChannel else { return }
+    pendingWatchChannel = nil
+    selectedChannel = channel
   }
 
   private func shouldAutoRefreshFollowedChannels() -> Bool {

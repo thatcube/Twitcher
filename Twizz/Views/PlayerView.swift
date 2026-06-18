@@ -90,6 +90,9 @@ struct PlayerView: View {
   @State private var channelDisplayName: String = ""
   @State private var channelAvatarURL: URL?
   @State private var channelPageTarget: ChannelPageTarget?
+  /// When the user picks a "More like this" channel from the channel page, we
+  /// stash its login and switch to it once the page cover finishes dismissing.
+  @State private var pendingSwitchLogin: String?
   @State private var chatDraft: String = ""
   @State private var chatInputActivationToken: Int = 0
   @State private var isSendingChat = false
@@ -284,8 +287,15 @@ struct PlayerView: View {
         // presentation modifiers on the *same* view conflict on tvOS and only
         // one fires, which previously left the avatar button doing nothing.
         .fullScreenCover(item: $channelPageTarget, onDismiss: { resumeAfterChannelPage() }) { target in
-          ChannelPageView(target: target)
-            .environment(\.themePalette, palette)
+          ChannelPageView(
+            target: target,
+            showsHeaderWatch: false,
+            onWatchChannel: { channel in
+              pendingSwitchLogin = channel.login
+              channelPageTarget = nil
+            }
+          )
+          .environment(\.themePalette, palette)
         }
 
       if chatLayoutMode.isOverlay {
@@ -927,8 +937,14 @@ struct PlayerView: View {
     )
   }
 
-  /// Resumes live playback once the channel page is dismissed.
+  /// Resumes live playback once the channel page is dismissed — or switches to a
+  /// different channel if the user picked one from the page's "More like this".
   private func resumeAfterChannelPage() {
+    if let login = pendingSwitchLogin {
+      pendingSwitchLogin = nil
+      followRaid(login)
+      return
+    }
     startPlayback()
     startLatencyMonitor()
     startPlaybackWatchdog()
