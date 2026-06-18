@@ -72,30 +72,39 @@ actor AudioOnlyLevelDecoder {
     }
   }
 
-  /// Fetches the playlist, decodes the newest unseen segment, and returns how
-  /// long (seconds) to wait before the next poll.
+  /// Fetches the playlist, decodes every newly-seen segment in order, and returns
+  /// how long (seconds) to wait before the next poll.
   private func tick() async throws -> Double {
     let playlist = try await fetchText(playlistURL)
     let segments = parseSegments(playlist, relativeTo: playlistURL)
-    guard let newest = segments.last else { return fallbackSegmentDuration }
+    guard !segments.isEmpty else { return fallbackSegmentDuration }
 
     // Avoid unbounded growth of the seen-set while keeping recent identity.
-    if processedSegments.count > 64 {
+    if processedSegments.count > 256 {
       processedSegments.removeAll(keepingCapacity: true)
     }
 
-    guard !processedSegments.contains(newest.url.absoluteString) else {
-      return newest.duration * 0.5
+    // Decode every not-yet-seen segment in chronological order so the loudness
+    // timeline stays continuous — gaps would break alignment with playback.
+    // Bound the catch-up so the very first poll doesn't decode the whole window.
+    let unseen = segments.filter { !processedSegments.contains($0.url.absoluteString) }
+    for seg in unseen { processedSegments.insert(seg.url.absoluteString) }
+
+    var lastDuration = segments.last?.duration ?? fallbackSegmentDuration
+    for seg in unseen.suffix(6) {
+      do {
+        let data = try await fetchData(seg.url)
+        let contour = try await decodeRMSContour(from: data, fallbackDuration: seg.duration)
+        if !contour.isEmpty {
+          let interval = seg.duration / Double(contour.count)
+          await monitor?.enqueueRealLevels(contour, interval: interval, startDate: seg.startDate)
+        }
+        lastDuration = seg.duration
+      } catch {
+        continue
+      }
     }
-    processedSegments.insert(newest.url.absoluteString)
-
-    let data = try await fetchData(newest.url)
-    let contour = try await decodeRMSContour(from: data, fallbackDuration: newest.duration)
-    guard !contour.isEmpty else { return newest.duration }
-
-    let interval = newest.duration / Double(contour.count)
-    await monitor?.enqueueRealLevels(contour, interval: interval)
-    return newest.duration
+    return lastDuration
   }
 
   // MARK: - Networking
@@ -119,22 +128,53 @@ actor AudioOnlyLevelDecoder {
   private struct Segment {
     let url: URL
     let duration: Double
+    let startDate: Date?
+  }
+
+  private let dateParser: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+  }()
+
+  private let plainDateParser: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+  }()
+
+  private func parseDate(_ string: String) -> Date? {
+    dateParser.date(from: string) ?? plainDateParser.date(from: string)
   }
 
   private func parseSegments(_ text: String, relativeTo base: URL) -> [Segment] {
     var segments: [Segment] = []
     var pendingDuration = fallbackSegmentDuration
+    // Program-date-time may be stated once and then implied per segment, so we
+    // carry a running clock and advance it by each segment's duration.
+    var runningDate: Date?
+    var pendingDate: Date?
     for raw in text.components(separatedBy: .newlines) {
       let line = raw.trimmingCharacters(in: .whitespaces)
-      if line.hasPrefix("#EXTINF:") {
+      if line.hasPrefix("#EXT-X-PROGRAM-DATE-TIME:") {
+        let value = String(line.dropFirst("#EXT-X-PROGRAM-DATE-TIME:".count))
+        let date = parseDate(value)
+        runningDate = date
+        pendingDate = date
+      } else if line.hasPrefix("#EXTINF:") {
         let value = line.dropFirst("#EXTINF:".count)
         let number = value.prefix { $0.isNumber || $0 == "." }
         pendingDuration = Double(number) ?? fallbackSegmentDuration
       } else if !line.isEmpty, !line.hasPrefix("#") {
         let url = URL(string: line, relativeTo: base)?.absoluteURL
         if let url {
-          segments.append(Segment(url: url, duration: pendingDuration))
+          let start = pendingDate ?? runningDate
+          segments.append(Segment(url: url, duration: pendingDuration, startDate: start))
+          if let rd = runningDate {
+            runningDate = rd.addingTimeInterval(pendingDuration)
+          }
         }
+        pendingDate = nil
         pendingDuration = fallbackSegmentDuration
       }
     }
