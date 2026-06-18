@@ -15,48 +15,6 @@ enum ChatReadabilityMode: String, CaseIterable {
   }
 }
 
-enum ChatTextSizeOption: String, CaseIterable {
-  case small
-  case medium
-  case large
-
-  var title: String {
-    switch self {
-    case .small: return "Small"
-    case .medium: return "Medium"
-    case .large: return "Large"
-    }
-  }
-}
-
-enum ChatLineSpacingOption: String, CaseIterable {
-  case tight
-  case normal
-  case relaxed
-
-  var title: String {
-    switch self {
-    case .tight: return "Tight"
-    case .normal: return "Normal"
-    case .relaxed: return "Relaxed"
-    }
-  }
-}
-
-enum ChatLineHeightOption: String, CaseIterable {
-  case tight
-  case normal
-  case relaxed
-
-  var title: String {
-    switch self {
-    case .tight: return "Tight"
-    case .normal: return "Normal"
-    case .relaxed: return "Relaxed"
-    }
-  }
-}
-
 /// User-adjustable width of the docked chat panel.
 enum ChatWidthMode: String, CaseIterable {
   case narrow

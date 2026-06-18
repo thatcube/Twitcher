@@ -1,0 +1,176 @@
+import CoreGraphics
+import Foundation
+
+/// Numeric, independently-tunable chat appearance values. These are the source
+/// of truth persisted via `@AppStorage`; the size presets and the migration
+/// from the older enum-based settings both resolve to values here.
+enum ChatAppearance {
+
+  // MARK: - Bounds & steps (kept sensible — no extreme values)
+
+  /// Body/name font point size.
+  static let textSizeRange: ClosedRange<CGFloat> = 20...32
+  static let textSizeStep: CGFloat = 2
+
+  /// Explicit emote height when not tracking the text size.
+  static let emoteSizeRange: ClosedRange<CGFloat> = 24...46
+  static let emoteSizeStep: CGFloat = 2
+
+  /// Extra spacing applied *within* a wrapped message line.
+  static let lineHeightRange: ClosedRange<CGFloat> = -2...8
+  static let lineHeightStep: CGFloat = 1
+
+  /// Vertical gap *between* messages.
+  static let messageSpacingRange: ClosedRange<CGFloat> = 4...20
+  static let messageSpacingStep: CGFloat = 2
+
+  /// Continuous docked-chat width.
+  static let widthRange: ClosedRange<CGFloat> = 340...760
+
+  // MARK: - Defaults (a fresh install lands on the "Normal" preset)
+
+  static let defaultTextSize: CGFloat = 26
+  static let defaultLineHeight: CGFloat = -1
+  static let defaultMessageSpacing: CGFloat = 14
+  static let defaultWidth: CGFloat = 460
+  static let defaultEmoteAuto = true
+  static let defaultEmoteSize: CGFloat = 34
+  static let defaultAnimatedEmotes = true
+
+  // MARK: - Derived values
+
+  /// Emote height when tracking the text size (Auto mode). Reproduces the prior
+  /// text→emote ratio (e.g. 26pt text → ~34pt emote).
+  static func autoEmoteHeight(forTextSize textSize: CGFloat) -> CGFloat {
+    (textSize * 1.3).rounded()
+  }
+
+  /// Username/badge glyph size, derived from the text size.
+  static func badgeSize(forTextSize textSize: CGFloat) -> CGFloat {
+    max(16, (textSize * 0.85).rounded())
+  }
+
+  /// Horizontal inset of the message list, derived from the text size.
+  static func horizontalPadding(forTextSize textSize: CGFloat) -> CGFloat {
+    max(16, textSize - 2)
+  }
+
+  /// Vertical inset of the message list, derived from the message spacing.
+  static func verticalPadding(forMessageSpacing spacing: CGFloat) -> CGFloat {
+    spacing + 4
+  }
+
+  /// Snap an arbitrary value to the nearest step within a range.
+  static func snap(_ value: CGFloat, to range: ClosedRange<CGFloat>, step: CGFloat) -> CGFloat {
+    let clamped = min(max(value, range.lowerBound), range.upperBound)
+    guard step > 0 else { return clamped }
+    let steps = ((clamped - range.lowerBound) / step).rounded()
+    return min(range.lowerBound + steps * step, range.upperBound)
+  }
+}
+
+/// The readability "size" presets surfaced on the main settings page. They drive
+/// only the text/emote/line-height/message-spacing cluster; chat width and
+/// position are independent. Selecting a preset stamps its values; editing any
+/// individual value flips the resolved preset to `nil` ("Custom").
+enum ChatAppearancePreset: String, CaseIterable, Identifiable {
+  case small
+  case normal
+  case large
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .small: return "Small"
+    case .normal: return "Normal"
+    case .large: return "Large"
+    }
+  }
+
+  /// Text/line-height/message-spacing values for this preset. Emote size is
+  /// always Auto for a clean preset (an explicit emote override reads as Custom).
+  var values: (textSize: CGFloat, lineHeight: CGFloat, messageSpacing: CGFloat) {
+    switch self {
+    case .small:  return (22, -2, 10)
+    case .normal: return (26, -1, 14)
+    case .large:  return (30, 2, 16)
+    }
+  }
+
+  /// Returns the preset matching the supplied values, or `nil` for "Custom".
+  static func resolve(
+    textSize: CGFloat,
+    lineHeight: CGFloat,
+    messageSpacing: CGFloat,
+    emoteIsAuto: Bool
+  ) -> ChatAppearancePreset? {
+    guard emoteIsAuto else { return nil }
+    return allCases.first { preset in
+      let v = preset.values
+      return v.textSize == textSize
+        && v.lineHeight == lineHeight
+        && v.messageSpacing == messageSpacing
+    }
+  }
+}
+
+/// One-time migration from the legacy enum-based chat settings
+/// (`chatTextSize`/`chatLineHeight`/`chatLineSpacing`/`chatWidthMode`) to the new
+/// numeric `@AppStorage` keys, preserving each user's exact prior look. Brand-new
+/// installs skip this and fall through to the numeric defaults (the Normal preset).
+enum ChatAppearanceMigration {
+  private static let flagKey = "chatAppearanceMigratedV1"
+
+  static func runIfNeeded(_ defaults: UserDefaults = .standard) {
+    guard !defaults.bool(forKey: flagKey) else { return }
+    defaults.set(true, forKey: flagKey)
+
+    // Only migrate when the new keys are absent, so we never clobber values the
+    // user has already set through the new UI.
+    if defaults.object(forKey: "chatTextSizeValue") == nil,
+      let raw = defaults.string(forKey: "chatTextSize") {
+      let value: CGFloat
+      switch raw {
+      case "small": value = 22
+      case "large": value = 28
+      default: value = 26
+      }
+      defaults.set(Double(value), forKey: "chatTextSizeValue")
+    }
+
+    if defaults.object(forKey: "chatLineHeightValue") == nil,
+      let raw = defaults.string(forKey: "chatLineHeight") {
+      let value: CGFloat
+      switch raw {
+      case "tight": value = -1
+      case "relaxed": value = 6
+      default: value = 2
+      }
+      defaults.set(Double(value), forKey: "chatLineHeightValue")
+    }
+
+    if defaults.object(forKey: "chatMessageSpacingValue") == nil,
+      let raw = defaults.string(forKey: "chatLineSpacing") {
+      let value: CGFloat
+      switch raw {
+      case "tight": value = 6
+      case "relaxed": value = 14
+      default: value = 10
+      }
+      defaults.set(Double(value), forKey: "chatMessageSpacingValue")
+    }
+
+    if defaults.object(forKey: "chatWidthValue") == nil,
+      let raw = defaults.string(forKey: "chatWidthMode") {
+      let value: CGFloat
+      switch raw {
+      case "narrow": value = 380
+      case "wide": value = 560
+      case "extraWide": value = 680
+      default: value = 460
+      }
+      defaults.set(Double(value), forKey: "chatWidthValue")
+    }
+  }
+}
