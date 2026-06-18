@@ -1454,11 +1454,6 @@ struct PlayerView: View {
           openSubpage(.appearance)
         }
         .focusSection()
-
-        Text("Presets adjust text, emote, line height, and spacing together. Use Advanced for per-value control.")
-          .font(.caption2)
-          .foregroundStyle(.white.opacity(0.55))
-          .fixedSize(horizontal: false, vertical: true)
       }
 
       VStack(alignment: .leading, spacing: 7) {
