@@ -550,18 +550,19 @@ final class TwitchAuthSession {
         guard isAuthenticated, let clientID, let userID else {
             throw FollowActionError.notSignedIn
         }
-        let accessToken = try await validAccessToken()
-        let broadcasterID = try await resolveBroadcasterID(
-            forLogin: channelLogin,
-            clientID: clientID,
-            accessToken: accessToken
-        )
-        return try await fetchFollowState(
-            broadcasterID: broadcasterID,
-            userID: userID,
-            clientID: clientID,
-            accessToken: accessToken
-        )
+        return try await withUserTokenRefreshRetry { accessToken in
+            let broadcasterID = try await resolveBroadcasterID(
+                forLogin: channelLogin,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+            return try await fetchFollowState(
+                broadcasterID: broadcasterID,
+                userID: userID,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+        }
     }
 
     /// Follows `channelLogin` on behalf of the signed-in user.
@@ -578,18 +579,19 @@ final class TwitchAuthSession {
         guard isAuthenticated, let clientID else {
             throw FollowActionError.notSignedIn
         }
-        let accessToken = try await validAccessToken()
-        let broadcasterID = try await resolveBroadcasterID(
-            forLogin: login,
-            clientID: clientID,
-            accessToken: accessToken
-        )
-        try await performFollowMutation(
-            targetID: broadcasterID,
-            follow: shouldFollow,
-            clientID: clientID,
-            accessToken: accessToken
-        )
+        try await withUserTokenRefreshRetry { accessToken in
+            let broadcasterID = try await resolveBroadcasterID(
+                forLogin: login,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+            try await performFollowMutation(
+                targetID: broadcasterID,
+                follow: shouldFollow,
+                clientID: clientID,
+                accessToken: accessToken
+            )
+        }
     }
 
     private func validAccessToken() async throws -> String {
@@ -597,6 +599,18 @@ final class TwitchAuthSession {
             return accessToken
         }
         return try await refreshAccessTokenIfNeeded(force: true)
+    }
+
+    private func withUserTokenRefreshRetry<T>(
+        _ operation: (String) async throws -> T
+    ) async throws -> T {
+        let accessToken = try await validAccessToken()
+        do {
+            return try await operation(accessToken)
+        } catch let error as TwitchAuthHTTPError where error.status == 401 {
+            let refreshedAccessToken = try await refreshAccessTokenIfNeeded(force: true)
+            return try await operation(refreshedAccessToken)
+        }
     }
 
     private func fetchFollowState(
@@ -641,6 +655,30 @@ final class TwitchAuthSession {
         clientID: String,
         accessToken: String
     ) async throws {
+        do {
+            try await performFollowMutationRequest(
+                targetID: targetID,
+                follow: follow,
+                clientID: clientID,
+                authorizationHeader: "OAuth \(accessToken)"
+            )
+        } catch let error as TwitchAuthHTTPError where error.status == 401 {
+            // Some Twitch GraphQL paths only accept Bearer even for user tokens.
+            try await performFollowMutationRequest(
+                targetID: targetID,
+                follow: follow,
+                clientID: clientID,
+                authorizationHeader: "Bearer \(accessToken)"
+            )
+        }
+    }
+
+    private func performFollowMutationRequest(
+        targetID: String,
+        follow: Bool,
+        clientID: String,
+        authorizationHeader: String
+    ) async throws {
         let query: String
         var variables: [String: Any] = ["targetID": targetID]
         if follow {
@@ -666,7 +704,7 @@ final class TwitchAuthSession {
 
         var req = URLRequest(url: URL(string: "https://gql.twitch.tv/gql")!)
         req.httpMethod = "POST"
-        req.setValue("OAuth \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
         req.setValue(clientID, forHTTPHeaderField: "Client-Id")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(
