@@ -142,11 +142,11 @@ struct StreamChannelCard: View {
     .padding(.horizontal, layout.focusHorizontalInset)
     .padding(.vertical, layout.focusVerticalInset)
     .frame(width: railCardWidth, alignment: .leading)
-    .background {
-      RoundedRectangle(cornerRadius: layout.cardCornerRadius)
-        .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
-    }
-    .clipShape(RoundedRectangle(cornerRadius: layout.cardCornerRadius))
+    .twizzLiquidGlassCard(
+      cornerRadius: layout.cardCornerRadius,
+      isFocused: isFocused,
+      palette: palette
+    )
     .shadow(
       color: Color.black.opacity(layout.usesFocusedShadow && isFocused ? 0.36 : 0),
       radius: layout.usesFocusedShadow ? 20 : 0,

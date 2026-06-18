@@ -590,11 +590,11 @@ private struct HomeCategoryCard: View {
     }
     .padding(10)
     .frame(width: width + 20)
-    .background {
-      RoundedRectangle(cornerRadius: cornerRadius)
-        .fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
-    }
-    .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+    .twizzLiquidGlassCard(
+      cornerRadius: cornerRadius,
+      isFocused: isFocused,
+      palette: palette
+    )
   }
 }
 
