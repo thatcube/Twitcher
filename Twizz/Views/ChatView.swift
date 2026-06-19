@@ -20,6 +20,13 @@ struct ChatView: View {
     var useGlassBackground: Bool = false
     /// When true, use a lighter non-glass background for overlay mode.
     var useLighterOverlayBackground: Bool = false
+    /// When false, the list stops pinning to the newest message so the viewer can
+    /// scroll back through history without the view yanking to the bottom.
+    var autoScroll: Bool = true
+    /// Shared player focus, so the scroll view participates in the page's focus
+    /// system (`.chatScroll`) instead of relying on tvOS's implicit overflow
+    /// focus, which leaked focus into chat unpredictably.
+    var focusBinding: FocusState<PlayerView.Focusable?>.Binding
     @Environment(\.themePalette) private var palette
     @State private var pendingScrollWork: DispatchWorkItem?
 
@@ -64,7 +71,9 @@ struct ChatView: View {
                 .padding(.vertical, verticalPadding)
             }
             .scrollIndicators(.hidden)
+            .focused(focusBinding, equals: .chatScroll)
             .onChange(of: messages.count) {
+                guard autoScroll else { return }
                 guard let last = messages.last else { return }
                 pendingScrollWork?.cancel()
                 let work = DispatchWorkItem {
@@ -75,9 +84,22 @@ struct ChatView: View {
                 pendingScrollWork = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
             }
+            .onChange(of: autoScroll) { _, isOn in
+                // Resuming after a pause: snap back to the newest message.
+                guard isOn, let last = messages.last else { return }
+                pendingScrollWork?.cancel()
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
             .onDisappear {
                 pendingScrollWork?.cancel()
                 pendingScrollWork = nil
+            }
+            .overlay(alignment: .bottom) {
+                if !autoScroll {
+                    pausedPill
+                }
             }
             .overlay {
                 if messages.isEmpty {
@@ -87,6 +109,20 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    /// Shown while the list is focused and auto-scroll is paused, so the viewer
+    /// knows new messages are still arriving below the current scroll position.
+    private var pausedPill: some View {
+        Label("Paused · press down to resume", systemImage: "pause.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(.black.opacity(0.65), in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+            .padding(.bottom, 12)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     private func line(for message: ChatMessage) -> some View {
