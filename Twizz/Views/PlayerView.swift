@@ -392,10 +392,13 @@ struct PlayerView: View {
   private let rewindWindowSeconds: Double = 1800
   /// Seconds the rewind step buttons jump per press.
   private let rewindStepSeconds: Double = 10
-  /// Trackpad swipe sensitivity: timeline-seconds moved per unit of finger travel
-  /// on the trackpad (the surface spans roughly -1...1, so a full edge-to-edge
-  /// swipe ≈ 2 units). Higher = a given swipe covers more of the rewind window.
-  private let scrubGainSecondsPerUnit: Double = 14
+  /// Trackpad swipe sensitivity, expressed as how much finger travel it takes to
+  /// scrub across the *entire* current seekable window (the surface spans roughly
+  /// -1...1, so one firm edge-to-edge swipe ≈ 1.5 units). Scrubbing is therefore
+  /// proportional to the window — like YouTube/Apple's players — so a tiny
+  /// just-arrived DVR window and a full 30-min one both feel the same instead of
+  /// the small one being hypersensitive.
+  private let scrubFullWindowTravelUnits: Double = 4
   // Latency tuning stays at the proven-stable baseline even in low-latency mode.
   // The latency win comes from the proxy promoting Twitch prefetch segments — not
   // from starving buffers or chasing the edge, both of which caused freezes and
@@ -3914,12 +3917,11 @@ struct PlayerView: View {
   /// momentum tail on release, which we translate into a smooth scrub.
   private func startScrubInput() {
     guard streamRewindEnabled else { return }
-    scrubInput.gain = scrubGainSecondsPerUnit
     scrubInput.onScrubBegan = { [self] in
       beginScrub()
     }
-    scrubInput.onScrubMoved = { [self] deltaSeconds in
-      handleScrubTick(deltaSeconds)
+    scrubInput.onScrubMoved = { [self] deltaUnits in
+      handleScrubTick(deltaUnits)
     }
     scrubInput.onScrubEnded = { [self] in
       endScrub()
@@ -3958,10 +3960,14 @@ struct PlayerView: View {
     scheduleHide()
   }
 
-  /// Applies one frame of swipe/momentum displacement: advance the intended
-  /// position, move the orb instantly, and issue a throttled tolerant seek.
-  private func handleScrubTick(_ deltaSeconds: Double) {
+  /// Applies one frame of swipe/momentum displacement: convert the raw finger
+  /// travel (in trackpad units) into timeline seconds *proportional to the current
+  /// window*, advance the intended position, move the orb instantly, and issue a
+  /// throttled tolerant seek.
+  private func handleScrubTick(_ deltaUnits: Double) {
     guard let window = currentSeekWindow() else { return }
+    let span = max(window.end - window.start, 0.001)
+    let deltaSeconds = deltaUnits * (span / scrubFullWindowTravelUnits)
     let liveCap = max(window.end - targetLiveEdgeSeconds, window.start)
     let base = scrubTargetSeconds ?? window.now
     let target = min(max(base + deltaSeconds, window.start), liveCap)
@@ -4953,12 +4959,11 @@ private struct ScrubBarButtonStyle: ButtonStyle {
 /// tracks how far/fast the finger moved, and a momentum tail continues the glide
 /// after release, decaying to a stop.
 final class ScrubInputCoordinator {
-  /// Timeline seconds moved per unit of finger travel, set by the view.
-  var gain: Double = 55
   /// Fires once a swipe passes the tap threshold (so a click-to-pause never
   /// registers as a scrub). The view pauses playback here.
   var onScrubBegan: (() -> Void)?
-  /// Per-frame timeline displacement (seconds) while swiping or coasting.
+  /// Per-frame finger travel (in trackpad units) while swiping or coasting. The
+  /// view converts this to timeline seconds proportional to the window.
   var onScrubMoved: ((Double) -> Void)?
   /// Fires when the swipe and its momentum tail have fully settled.
   var onScrubEnded: (() -> Void)?
@@ -5047,7 +5052,7 @@ final class ScrubInputCoordinator {
         if abs(pendingTravel) > tapThreshold {
           phase = .tracking
           onScrubBegan?()
-          onScrubMoved?(pendingTravel * gain)
+          onScrubMoved?(pendingTravel)
         }
       } else {
         // Released without moving far enough — it was a tap/click, not a scrub.
@@ -5059,7 +5064,7 @@ final class ScrubInputCoordinator {
         let dx = sample.x - lastX
         lastX = sample.x
         velocity = velocity * 0.6 + (dx / duration) * 0.4
-        if dx != 0 { onScrubMoved?(dx * gain) }
+        if dx != 0 { onScrubMoved?(dx) }
       } else {
         // Finger lifted: start coasting from the smoothed release velocity.
         velocity = min(max(velocity, -maxMomentumVelocity), maxMomentumVelocity)
@@ -5073,7 +5078,7 @@ final class ScrubInputCoordinator {
         velocity = 0
         onScrubEnded?()
       } else {
-        onScrubMoved?(velocity * duration * gain)
+        onScrubMoved?(velocity * duration)
       }
     }
   }
