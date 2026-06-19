@@ -196,18 +196,20 @@ extension PlayerView {
     return item
   }
 
-  /// "Behind live" as the user experiences it: how far the playhead trails the
-  /// freshest segment we can actually fetch (the seekable-edge gap, ~2-6s).
+  /// "Behind live" as the viewer actually experiences it: how far behind the real
+  /// broadcast the on-screen picture is. That is the wall-clock delay
+  /// (`now − EXT-X-PROGRAM-DATE-TIME` at the playhead) — the same value used to
+  /// sync chat. It is the honest "glass-to-glass-ish" number; for a Twitch
+  /// low-latency stream it lands around ~5-15s.
   ///
-  /// We deliberately do NOT lead with the PROGRAM-DATE-TIME wall-clock delay.
-  /// That measures distance from Twitch's *encoder* timestamp, which for a
-  /// standard-latency stream is ~18-20s — and every other client (including the
-  /// Twitch phone app) sits that far back too. So it reads "20s behind live"
-  /// while you're visually in sync with your phone, which is just confusing.
-  /// The edge gap is the number that tracks "am I near the freshest content."
-  /// Wall-clock is kept only as a fallback when the edge gap is unavailable.
+  /// We deliberately do NOT lead with the seekable-edge gap. That only measures
+  /// the small in-buffer distance to the tail of the playlist we currently hold
+  /// (~2-6s), so it collapses toward ~0 whenever the playhead is near the edge —
+  /// reading "2s behind" while the picture is really 10-15s behind the broadcast.
+  /// The edge gap is kept only as a fallback when no PROGRAM-DATE-TIME is present,
+  /// and is still surfaced separately in the Diagnostics overlay.
   var rawLatencySeconds: Double? {
-    liveEdgeLatencySeconds ?? wallClockLatencySeconds
+    wallClockLatencySeconds ?? liveEdgeLatencySeconds
   }
 
   /// Smoothed value actually shown in the UI, to stop the number jumping around.
@@ -216,9 +218,9 @@ extension PlayerView {
   }
 
   /// True while playback is active but the latency reading hasn't settled yet.
-  /// The live-edge gap reads ~0 right after playback starts and then climbs to
-  /// the real value, so we wait for the number to stabilise (and clear a
-  /// plausible floor) before trusting it, with a hard sample cap as a backstop.
+  /// The estimate can read low or jump around for the first samples after a
+  /// (re)start, so we wait for it to stabilise (and clear a plausible floor)
+  /// before trusting it, with a hard sample cap as a backstop.
   var isLatencyWarmingUp: Bool {
     guard isPlaybackActive else { return false }
     guard let seconds = measuredLatencySeconds else { return true }
@@ -604,14 +606,31 @@ extension PlayerView {
       smoothedLatencySeconds = nil
       latencySampleCount = 0
       latencyStableCount = 0
+      latencyOutlierStreak = 0
       return
     }
     guard let prev = smoothedLatencySeconds else {
       smoothedLatencySeconds = raw
       latencySampleCount = 1
       latencyStableCount = 0
+      latencyOutlierStreak = 0
       return
     }
+
+    // Reject a single wildly-deviating sample (e.g. a momentarily stale
+    // PROGRAM-DATE-TIME right after a seek, which can read hundreds of seconds)
+    // until it is corroborated by another sample, so a transient spike never
+    // flashes on screen. A genuine large change (a real deep rewind) persists and
+    // is accepted on the next tick.
+    if abs(raw - prev) >= latencyOutlierSeconds {
+      latencyOutlierStreak += 1
+      if latencyOutlierStreak < latencyOutlierConfirmSamples {
+        return
+      }
+    } else {
+      latencyOutlierStreak = 0
+    }
+
     let next: Double
     if abs(raw - prev) >= 3 {
       next = raw
