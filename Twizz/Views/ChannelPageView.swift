@@ -51,6 +51,15 @@ struct ChannelPageView: View {
 
   private var hasBanner: Bool { profile?.bannerImageURL != nil }
 
+  /// Keep the page non-focusable until its primary async sections are ready.
+  /// The freezes happen when the user starts navigating while profile/content
+  /// rows are still being inserted and measured. Home/Browse build their rails
+  /// from already-set arrays; this gate gives the channel page the same stable
+  /// first focus pass.
+  private var isPrimaryContentReady: Bool {
+    !isLoadingProfile && !isLoadingContent
+  }
+
   /// Which tile should claim focus when the page first settles: the live card if
   /// the channel is live, otherwise the first clip, otherwise the first VOD. Fed
   /// to `.prefersDefaultFocus` per tile; recomputes as content streams in so the
@@ -93,13 +102,17 @@ struct ChannelPageView: View {
         bannerBackdrop(fullHeight: fullHeight)
 
         ScrollView(.vertical, showsIndicators: false) {
-          LazyVStack(alignment: .leading, spacing: 30) {
-            heroCard
-            liveOrLastCard
-            clipsRow
-            vodsRow
-            similarRow
-            aboutAndLinks
+          VStack(alignment: .leading, spacing: 30) {
+            if isPrimaryContentReady {
+              heroCard
+              liveOrLastCard
+              clipsRow
+              vodsRow
+              similarRow
+              aboutAndLinks
+            } else {
+              initialLoadingView
+            }
           }
           // Push content down so the identity card straddles the banner's
           // bottom edge by 50%. The banner starts at the true screen top, so we
@@ -213,10 +226,24 @@ struct ChannelPageView: View {
     .twizzLiquidGlassCard(
       cornerRadius: heroCorner,
       isFocused: false,
-      palette: palette,
-      nativeGlass: false
+      palette: palette
     )
     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heroHeight = $0 }
+    .padding(.horizontal, AppLayout.horizontalPadding)
+  }
+
+  private var initialLoadingView: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      ProgressView()
+      Text("Loading channel…")
+        .font(.title3.weight(.semibold))
+      Text("Preparing clips and past broadcasts")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    }
+    .padding(24)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .twizzLiquidGlassCard(cornerRadius: heroCorner, isFocused: false, palette: palette)
     .padding(.horizontal, AppLayout.horizontalPadding)
   }
 
@@ -349,8 +376,7 @@ struct ChannelPageView: View {
       .twizzLiquidGlassCard(
         cornerRadius: heroCorner,
         isFocused: isFocused,
-        palette: palette,
-        nativeGlass: false
+        palette: palette
       )
       .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 22, y: 12)
     }
@@ -386,8 +412,7 @@ struct ChannelPageView: View {
     .twizzLiquidGlassCard(
       cornerRadius: heroCorner,
       isFocused: false,
-      palette: palette,
-      nativeGlass: false
+      palette: palette
     )
     .padding(.horizontal, AppLayout.horizontalPadding)
   }
@@ -504,7 +529,7 @@ struct ChannelPageView: View {
           .padding(.horizontal, AppLayout.horizontalPadding)
 
         ScrollView(.horizontal, showsIndicators: false) {
-          LazyHStack(spacing: 22) {
+          HStack(spacing: 22) {
             ForEach(recommendations) { channel in
               FocusableTile(
                 id: "rec-\(channel.id)",
@@ -526,8 +551,7 @@ struct ChannelPageView: View {
                     cardCornerRadius: cardCorner,
                     mediaCornerRadius: mediaCorner
                   ),
-                  showsGameName: true,
-                  usesNativeGlass: false
+                  showsGameName: true
                 )
                 .accessibilityAddTraits(.isButton)
               }
@@ -602,7 +626,7 @@ struct ChannelPageView: View {
         .padding(.horizontal, AppLayout.horizontalPadding)
 
       ScrollView(.horizontal, showsIndicators: false) {
-        LazyHStack(alignment: .top, spacing: 22) {
+        HStack(alignment: .top, spacing: 22) {
           tiles()
         }
         .padding(.horizontal, AppLayout.horizontalPadding)
@@ -632,18 +656,18 @@ struct ChannelPageView: View {
     profileFailed = false
     isLoadingContent = true
     isLoadingRecs = true
+    profile = nil
+    content = nil
+    recommendations = []
 
     async let profileTask = ChannelProfileService.fetch(login: target.login)
     async let contentTask = ChannelContentService.load(login: target.login)
 
-    let loadedProfile = await profileTask
+    let (loadedProfile, loadedContent) = await (profileTask, contentTask)
     profile = loadedProfile
     profileFailed = loadedProfile == nil
-    isLoadingProfile = false
-    applyInitialFocusIfNeeded()
-
-    let loadedContent = await contentTask
     content = loadedContent
+    isLoadingProfile = false
     isLoadingContent = false
     applyInitialFocusIfNeeded()
 
@@ -784,10 +808,6 @@ private struct FocusableTile<Content: View>: View {
 
   var body: some View {
     content(isFocused)
-      .overlay {
-        RoundedRectangle(cornerRadius: cornerRadius)
-          .strokeBorder(.white.opacity(isFocused ? 0.85 : 0), lineWidth: 5)
-      }
       .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
       .focusable(true)
       .focused($focusedID, equals: id)

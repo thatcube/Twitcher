@@ -6,7 +6,7 @@ import SwiftUI
 struct TwizzLiquidGlassCardModifier: ViewModifier {
   let cornerRadius: CGFloat
   let isFocused: Bool
-  let liftSurface: Color
+  let palette: ThemePalette
   /// When false, the live Liquid Glass material is rendered only while the card
   /// is focused; unfocused cards fall back to a cheap translucent fill. Each
   /// `.glassEffect` is a real-time backdrop sample, so on dense screens (e.g. the
@@ -15,19 +15,18 @@ struct TwizzLiquidGlassCardModifier: ViewModifier {
   /// major source of GPU overdraw. Defaults to true to preserve existing visuals
   /// everywhere else in the app.
   var glassWhenUnfocused: Bool = true
-  var nativeGlass: Bool = true
 
   func body(content: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
-    if #available(tvOS 26.0, *), nativeGlass, isFocused || glassWhenUnfocused {
+    if #available(tvOS 26.0, *), isFocused || glassWhenUnfocused {
       content
         .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
         .clipShape(shape)
     } else {
       content
         .background {
-          shape.fill(isFocused ? liftSurface : Color.primary.opacity(0.07))
+          shape.fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
         }
         .overlay {
           shape.strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
@@ -38,20 +37,13 @@ struct TwizzLiquidGlassCardModifier: ViewModifier {
 }
 
 extension View {
-  func twizzLiquidGlassCard(
-    cornerRadius: CGFloat,
-    isFocused: Bool,
-    palette: ThemePalette,
-    glassWhenUnfocused: Bool = true,
-    nativeGlass: Bool = true
-  ) -> some View {
+  func twizzLiquidGlassCard(cornerRadius: CGFloat, isFocused: Bool, palette: ThemePalette, glassWhenUnfocused: Bool = true) -> some View {
     modifier(
       TwizzLiquidGlassCardModifier(
         cornerRadius: cornerRadius,
         isFocused: isFocused,
-        liftSurface: palette.liftSurface,
-        glassWhenUnfocused: glassWhenUnfocused,
-        nativeGlass: nativeGlass
+        palette: palette,
+        glassWhenUnfocused: glassWhenUnfocused
       )
     )
   }
