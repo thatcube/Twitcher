@@ -4178,6 +4178,11 @@ private struct ChatMessagesColumn: View {
   private var isConnected: Bool { replay?.isReady ?? chat?.isConnected ?? false }
   private var emoteURLs: [String: URL] { replay?.emoteURLs ?? chat?.emoteURLs ?? [:] }
   private var badgeURLs: [String: URL] { replay?.badgeURLs ?? chat?.badgeURLs ?? [:] }
+  private var cheermotes: [Cheermote] { replay?.cheermotes ?? chat?.cheermotes ?? [] }
+  /// VOD comments carry no `bits` tag, so cheermote tokens there are matched by
+  /// token alone (the way Twitch renders VOD cheers). Live chat stays gated on
+  /// the IRC `bits` tag to avoid false positives.
+  private var matchCheersWithoutBits: Bool { replay != nil }
 
   var body: some View {
     ChatView(
@@ -4194,6 +4199,8 @@ private struct ChatMessagesColumn: View {
       isConnected: isConnected,
       emoteURLs: emoteURLs,
       badgeURLs: badgeURLs,
+      cheermotes: cheermotes,
+      matchCheersWithoutBits: matchCheersWithoutBits,
       useGlassBackground: useGlassBackground,
       useLighterOverlayBackground: useLighterOverlayBackground,
       autoScroll: autoScroll,
