@@ -95,7 +95,6 @@ struct StreamChannelCard: View {
   let isFocused: Bool
   var layout: Layout = .grid()
   var showsGameName: Bool = false
-  var usesNativeGlass: Bool = true
   /// When provided, a press-and-hold context menu exposes "Watch".
   var onWatch: ((FollowedChannel) -> Void)? = nil
   /// When provided, a press-and-hold context menu exposes "Go to Channel".
@@ -153,8 +152,7 @@ struct StreamChannelCard: View {
     .twizzLiquidGlassCard(
       cornerRadius: layout.cardCornerRadius,
       isFocused: isFocused,
-      palette: palette,
-      nativeGlass: usesNativeGlass
+      palette: palette
     )
     .shadow(
       color: Color.black.opacity(layout.usesFocusedShadow && isFocused ? 0.36 : 0),
