@@ -281,10 +281,12 @@ struct PlayerView: View {
   private let chatComposerRowHeight: CGFloat = 62
 
   @FocusState private var focus: Focusable?
-  private enum Focusable: Hashable {
+  enum Focusable: Hashable {
     case video, streamInfo, quality, chatToggle, chatInput, errorBack
     case offlineViewChannel, offlineTryAgain
     case chatSend
+    /// The scrollable chat message list. Focusing it pauses auto-scroll.
+    case chatScroll
     case raidFollowCancel
     case simulateRaidButton
     case simulateOfflineButton
@@ -943,6 +945,24 @@ struct PlayerView: View {
           case .left:
             focus = .streamInfo
           case .right:
+            focus = .chatSettingsButton
+          default:
+            break
+          }
+        }
+
+        Button {
+          openChatSettingsFromControlBar()
+        } label: {
+          Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
+            .accessibilityLabel("Chat Settings")
+        }
+        .focused($focus, equals: .chatSettingsButton)
+        .onMoveCommand { direction in
+          switch direction {
+          case .left:
+            focus = .quality
+          case .right:
             focus = .chatToggle
           default:
             break
@@ -963,7 +983,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            focus = .quality
+            focus = .chatSettingsButton
           case .right:
             if showChat {
               focus = .chatInput
@@ -978,10 +998,10 @@ struct PlayerView: View {
       .focusSection()
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    // Treat the whole control row (avatar, quality, chat toggle) as one focus
-    // section so tvOS keeps focus within it during fast trackpad swipes. Without
-    // this, when chat is open the adjacent chat pane (composer, settings button)
-    // offers competing focus targets and a quick swipe can fling focus out of
+    // Treat the whole control row (avatar, quality, settings, chat toggle) as one
+    // focus section so tvOS keeps focus within it during fast trackpad swipes.
+    // Without this, when chat is open the adjacent chat pane (composer, message
+    // list) offers competing focus targets and a quick swipe can fling focus out of
     // the row or drop it entirely — which never happens with chat closed.
     .focusSection()
     .padding(.leading, 48)
@@ -1218,6 +1238,18 @@ struct PlayerView: View {
           scheduleHide()
           return
         }
+        // Keep the controls (and the chat composer beneath them) on screen while
+        // the viewer is scrolling chat history, and never yank focus to the video.
+        if focus == .chatScroll {
+          scheduleHide()
+          return
+        }
+        // The settings button now lives in the control bar, so keep the bar up
+        // while its panel is open — closing the panel returns focus to it.
+        if showChatSettings {
+          scheduleHide()
+          return
+        }
         hideControls()
       }
     }
@@ -1332,7 +1364,9 @@ struct PlayerView: View {
         emoteURLs: chat.emoteURLs,
         badgeURLs: chat.badgeURLs,
         useGlassBackground: isGlass,
-        useLighterOverlayBackground: useLighterOverlayBackground
+        useLighterOverlayBackground: useLighterOverlayBackground,
+        autoScroll: focus != .chatScroll,
+        focusBinding: $focus
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -1359,14 +1393,6 @@ struct PlayerView: View {
         .transition(.move(edge: .trailing).combined(with: .opacity))
       }
     }
-    // Keep the settings button pinned to the top-right of the chat. It stays put
-    // while the panel opens to the left — intentionally disconnected so the chat
-    // is never covered.
-    .overlay(alignment: .topTrailing) {
-      chatSettingsButton
-        .padding(.top, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
-        .padding(.trailing, isGlass ? GlassChatPaneStyle.edgeInset + 16 : 16)
-    }
     .animation(.easeOut(duration: 0.18), value: showChatSettings)
   }
 
@@ -1374,27 +1400,6 @@ struct PlayerView: View {
   private let chatSettingsPanelGap: CGFloat = 16
 
   // MARK: - Floating chat settings
-
-  /// The compact button that toggles the settings panel. It is only reachable by
-  /// pressing up from the chat input, so it never steals focus while the user is
-  /// scrolling or typing.
-  private var chatSettingsButton: some View {
-    Button {
-      toggleChatSettings()
-    } label: {
-      Icon(glyph: showChatSettings ? .x : .adjustmentsHorizontal)
-        .frame(width: Icon.controlButtonSize, height: Icon.controlButtonSize)
-    }
-    .TwizzControlButtonStyle()
-    .focused($focus, equals: .chatSettingsButton)
-    .onMoveCommand { direction in
-      if direction == .down, showChatSettings {
-        focus = firstChatSettingsFocus
-      } else if direction == .down {
-        focus = .chatInput
-      }
-    }
-  }
 
   /// The focus target for the first control on whichever settings page is shown.
   private var firstChatSettingsFocus: Focusable {
@@ -2021,6 +2026,15 @@ struct PlayerView: View {
     }
   }
 
+  /// Settings button lives in the control bar, so it must work even when chat is
+  /// hidden: open chat first, then reveal the panel.
+  private func openChatSettingsFromControlBar() {
+    if !showChat {
+      toggleChatVisibility()
+    }
+    toggleChatSettings()
+  }
+
   private func toggleChatSettings() {
     showChatSettings.toggle()
     if showChatSettings {
@@ -2091,7 +2105,7 @@ struct PlayerView: View {
             case .left:
               revealControls(preferredFocus: .chatToggle)
             case .up:
-              focus = .chatSettingsButton
+              focus = .chatScroll
             case .right:
               if hasChatDraft { focus = .chatSend }
             default:
@@ -2155,7 +2169,7 @@ struct PlayerView: View {
           case .left:
             revealControls(preferredFocus: .chatToggle)
           case .up:
-            focus = .chatSettingsButton
+            focus = .chatScroll
           default:
             break
           }
