@@ -130,11 +130,13 @@ extension PlayerView {
       kicker: Self.hypeTrainKicker(train.phase),
       tint: tint,
       title: Self.hypeTrainTitle(train),
-      style: style
-    ) {
-      if let expiresAt = train.expiresAt, train.phase != .completed {
-        HypeTrainCountdown(expiresAt: expiresAt, tint: tint, style: style)
+      style: style,
+      trailing: {
+        if let expiresAt = train.expiresAt, train.phase != .completed {
+          HypeTrainCountdown(expiresAt: expiresAt, tint: tint, style: style)
+        }
       }
+    ) {
       if train.goal > 0 {
         MomentBar(
           label: train.phase == .approaching ? "Contributions to start" : "Progress to next level",
@@ -187,12 +189,13 @@ extension PlayerView {
   // MARK: - Shared card
 
   @ViewBuilder
-  private func momentCard<Content: View>(
+  private func momentCard<Trailing: View, Content: View>(
     glyph: Glyph,
     kicker: String,
     tint: Color,
     title: String,
     style: MomentDockStyle,
+    @ViewBuilder trailing: () -> Trailing = { EmptyView() },
     @ViewBuilder content: () -> Content
   ) -> some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -203,7 +206,8 @@ extension PlayerView {
           .font(.caption2).bold()
           .tracking(1.1)
           .foregroundStyle(tint)
-        Spacer(minLength: 0)
+        Spacer(minLength: 8)
+        trailing()
       }
       Text(title)
         .font(.headline)
@@ -357,17 +361,18 @@ private struct MomentBar: View {
   }
 }
 
-/// A live, self-updating countdown to a Hype Train's expiry. Uses SwiftUI's
-/// `Text(timerInterval:)` so the clock ticks without a manual timer, and clamps
-/// to `0:00` once the window has lapsed (an out-of-order range would trap).
+/// A live, self-updating countdown to a Hype Train's expiry, sized to tuck into
+/// the card header's top-right. Uses SwiftUI's `Text(timerInterval:)` so the
+/// clock ticks without a manual timer, and clamps to `0:00` once the window has
+/// lapsed (an out-of-order range would trap).
 private struct HypeTrainCountdown: View {
   let expiresAt: Date
   let tint: Color
   let style: MomentDockStyle
 
   var body: some View {
-    HStack(spacing: 6) {
-      Icon(glyph: .clock, size: 15)
+    HStack(spacing: 4) {
+      Icon(glyph: .clock, size: 13)
         .foregroundStyle(tint)
       Group {
         if expiresAt > .now {
@@ -376,13 +381,11 @@ private struct HypeTrainCountdown: View {
           Text("0:00")
         }
       }
-      .font(.subheadline).bold()
+      .font(.caption).bold()
       .monospacedDigit()
       .foregroundStyle(style.primaryText.opacity(0.9))
-      Text("left")
-        .font(.caption)
-        .foregroundStyle(style.secondaryText)
-      Spacer(minLength: 0)
+      .lineLimit(1)
+      .fixedSize()
     }
   }
 }
