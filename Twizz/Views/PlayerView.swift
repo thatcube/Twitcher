@@ -1602,7 +1602,7 @@ struct PlayerView: View {
           // footprint, just with less empty space around the image.
           .padding(-6)
         }
-        .TwizzControlButtonStyle()
+        .TwizzControlButtonStyle(shape: .circle)
         .buttonBorderShape(.circle)
         .accessibilityLabel("Channel info")
         .accessibilityHint("Opens the channel page")
@@ -2364,7 +2364,7 @@ struct PlayerView: View {
                   .frame(width: 24, height: 24)
               }
             }
-            .TwizzControlButtonStyle()
+            .TwizzControlButtonStyle(shape: .circle)
             .frame(width: chatComposerRowHeight, height: chatComposerRowHeight)
             // `.disabled` also doubles as the rewind-bar focus gate; see the
             // composer button above for why we avoid `.focusable` on a Button.
@@ -2686,14 +2686,16 @@ struct PlayerView: View {
   }
 }
 
+/// Shape of an opaque player-control pill in the glass-disabled path.
+enum TwizzControlShape: Equatable {
+  case capsule
+  case circle
+}
+
 extension View {
   @ViewBuilder
-  fileprivate func TwizzControlButtonStyle() -> some View {
-    if #available(tvOS 26.0, *) {
-      self.buttonStyle(.glass)
-    } else {
-      self.buttonStyle(.automatic)
-    }
+  fileprivate func TwizzControlButtonStyle(shape: TwizzControlShape = .capsule) -> some View {
+    modifier(TwizzControlButtonStyleModifier(shape: shape))
   }
 
   /// Native Liquid Glass for the compact chat-settings controls: the exact same
@@ -2703,22 +2705,187 @@ extension View {
   /// imitation. Selected options render prominent; everything else is plain
   /// glass. Falls back to bordered styles before tvOS 26.
   @ViewBuilder
-  func chatSettingsGlassButton(isSelected: Bool = false) -> some View {
-    if #available(tvOS 26.0, *) {
+  func chatSettingsGlassButton(isSelected: Bool = false, shape: TwizzControlShape = .capsule) -> some View {
+    modifier(ChatSettingsGlassButtonModifier(isSelected: isSelected, shape: shape))
+  }
+}
+
+/// Chat-settings popover pills: native Liquid Glass when glass is enabled, or a
+/// theme-aware opaque pill when glass is disabled — so the popover stays legible
+/// and on-theme (light pills + dark text in Light mode) once its surface goes
+/// opaque, matching the player's control pills.
+private struct ChatSettingsGlassButtonModifier: ViewModifier {
+  var isSelected: Bool
+  var shape: TwizzControlShape
+  @Environment(\.glassDisabled) private var glassDisabled
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if glassDisabled {
+      content
+        .buttonStyle(TwizzOpaquePillButtonStyle(isSelected: isSelected, shape: shape))
+        .focusEffectDisabled()
+    } else if #available(tvOS 26.0, *) {
       if isSelected {
         // Active state mirrors the main SettingsView pills: native prominent
         // glass plus a trailing checkmark (added by the caller). No tint — the
         // prominent fill + checkmark is the established app pattern.
-        self.buttonStyle(.glassProminent)
+        content.buttonStyle(.glassProminent)
       } else {
-        self.buttonStyle(.glass)
+        content.buttonStyle(.glass)
       }
     } else {
       if isSelected {
-        self.buttonStyle(.borderedProminent)
+        content.buttonStyle(.borderedProminent)
       } else {
-        self.buttonStyle(.bordered)
+        content.buttonStyle(.bordered)
       }
+    }
+  }
+}
+
+/// Opaque, theme-aware pill for the chat-settings popover. Like the control-pill
+/// style it flips to the standard tvOS focused look (white fill + dark label),
+/// and marks the selected option with a prominent brand fill + light label
+/// (the caller still adds the trailing checkmark) so selection reads in both
+/// light and dark themes.
+private struct TwizzOpaquePillButtonStyle: ButtonStyle {
+  var isSelected: Bool
+  var shape: TwizzControlShape
+
+  func makeBody(configuration: Configuration) -> some View {
+    PillBody(configuration: configuration, isSelected: isSelected, shape: shape)
+  }
+
+  private struct PillBody: View {
+    let configuration: ButtonStyle.Configuration
+    let isSelected: Bool
+    let shape: TwizzControlShape
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.themePalette) private var palette
+
+    private var fill: Color {
+      if isFocused { return .white }
+      if isSelected { return ThemePalette.brandPurple }
+      return palette.chromeOpaqueSurface
+    }
+    private var foreground: Color {
+      if isFocused { return .black }
+      if isSelected { return .white }
+      return palette.chromeOnOpaque
+    }
+    private var border: Color {
+      (isFocused || isSelected) ? .clear : palette.chromeOpaqueBorder
+    }
+
+    var body: some View {
+      Group {
+        switch shape {
+        case .capsule:
+          styled(Capsule(style: .continuous))
+        case .circle:
+          styled(Circle())
+        }
+      }
+      .scaleEffect(configuration.isPressed ? 0.96 : (isFocused ? 1.06 : 1.0))
+      .shadow(
+        color: .black.opacity(isFocused ? 0.28 : 0.0),
+        radius: isFocused ? 12 : 0, x: 0, y: isFocused ? 6 : 0)
+      .animation(.easeOut(duration: 0.16), value: isFocused)
+      .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    @ViewBuilder
+    private func styled<S: InsettableShape>(_ s: S) -> some View {
+      let isCircle = (shape == .circle)
+      configuration.label
+        .foregroundStyle(foreground)
+        .padding(.horizontal, isCircle ? 12 : 22)
+        .padding(.vertical, isCircle ? 12 : 14)
+        .background(fill, in: s)
+        .overlay(s.strokeBorder(border, lineWidth: 1))
+        .clipShape(s)
+    }
+  }
+}
+
+/// Player control buttons: native Liquid Glass when glass is enabled, or a
+/// theme-aware opaque pill when glass is disabled (OS Reduce Transparency or the
+/// in-app Disable Liquid Glass toggle). The opaque pill mirrors the card/chrome
+/// surfaces — an opaque themed fill with a contrasting foreground (light fill +
+/// dark glyph in Light theme, near-black + light glyph in dark/oled) — and
+/// follows the tvOS focus convention of a bright white fill + dark glyph when
+/// focused. The native glass path is left untouched when glass is enabled.
+private struct TwizzControlButtonStyleModifier: ViewModifier {
+  var shape: TwizzControlShape
+  @Environment(\.glassDisabled) private var glassDisabled
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if glassDisabled {
+      content
+        .buttonStyle(TwizzOpaqueControlButtonStyle(shape: shape))
+        // We draw our own focus treatment (white fill + lift), so suppress the
+        // system focus effect that would otherwise layer on top of a custom
+        // button style.
+        .focusEffectDisabled()
+    } else if #available(tvOS 26.0, *) {
+      content.buttonStyle(.glass)
+    } else {
+      content.buttonStyle(.automatic)
+    }
+  }
+}
+
+/// Opaque, theme-aware control pill used when glass is disabled. Reads the
+/// button's own focus state via `@Environment(\.isFocused)` (valid inside a
+/// button style's body) so it can flip to the standard tvOS focused look —
+/// bright white fill + dark glyph, scaled and shadowed — while the resting state
+/// stays an opaque themed surface with the theme's on-opaque foreground.
+private struct TwizzOpaqueControlButtonStyle: ButtonStyle {
+  var shape: TwizzControlShape
+
+  func makeBody(configuration: Configuration) -> some View {
+    OpaqueControlButtonBody(configuration: configuration, shape: shape)
+  }
+
+  private struct OpaqueControlButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let shape: TwizzControlShape
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.themePalette) private var palette
+
+    private var fill: Color { isFocused ? .white : palette.chromeOpaqueSurface }
+    private var foreground: Color { isFocused ? .black : palette.chromeOnOpaque }
+    private var border: Color { isFocused ? .clear : palette.chromeOpaqueBorder }
+
+    var body: some View {
+      Group {
+        switch shape {
+        case .capsule:
+          styled(Capsule(style: .continuous))
+        case .circle:
+          styled(Circle())
+        }
+      }
+      .scaleEffect(configuration.isPressed ? 0.96 : (isFocused ? 1.08 : 1.0))
+      .shadow(
+        color: .black.opacity(isFocused ? 0.28 : 0.0),
+        radius: isFocused ? 12 : 0, x: 0, y: isFocused ? 6 : 0)
+      .animation(.easeOut(duration: 0.16), value: isFocused)
+      .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    @ViewBuilder
+    private func styled<S: InsettableShape>(_ s: S) -> some View {
+      let isCircle = (shape == .circle)
+      configuration.label
+        .foregroundStyle(foreground)
+        .padding(.horizontal, isCircle ? 10 : 22)
+        .padding(.vertical, isCircle ? 10 : 14)
+        .background(fill, in: s)
+        .overlay(s.strokeBorder(border, lineWidth: 1))
+        .clipShape(s)
     }
   }
 }
@@ -3225,6 +3392,7 @@ private struct GlassChatPaneStyle: ViewModifier {
 /// panel can size to its content and its inner focus effects can lift freely.
 struct ChatSettingsPanelGlassStyle: ViewModifier {
   @Environment(\.glassDisabled) private var glassDisabled
+  @Environment(\.themePalette) private var palette
   private var shape: RoundedRectangle {
     RoundedRectangle(cornerRadius: 40, style: .continuous)
   }
@@ -3233,8 +3401,8 @@ struct ChatSettingsPanelGlassStyle: ViewModifier {
   func body(content: Content) -> some View {
     if glassDisabled {
       content
-        .background(Color.twizzOpaqueGlass, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 1))
+        .background(palette.chromeOpaqueSurface, in: shape)
+        .overlay(shape.strokeBorder(palette.chromeOpaqueBorder, lineWidth: 1))
     } else if #available(tvOS 26.0, *) {
       content
         // Same darkening scrim the Glass chat pane paints over its glass
