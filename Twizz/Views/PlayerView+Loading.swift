@@ -300,7 +300,6 @@ extension PlayerView {
     isPlaybackActive = false
     didRequestPlayback = false
     edgeLatencyLowConfidenceStreak = 0
-    wallClockHighLatencyStreak = 0
     wallClockLowConfidenceStreak = 0
     lastPlaybackDateSample = nil
     lastPlaybackTimeSampleSeconds = nil
@@ -718,12 +717,7 @@ extension PlayerView {
           ? nil
           : liveEdgeLatencyRaw
         liveEdgeLatencySeconds = liveEdgeLatency
-        applyLiveLatencyCorrection(
-          item: item,
-          range: range,
-          wallClockLatency: wallClockLatencySeconds,
-          liveEdgeLatency: liveEdgeLatency
-        )
+        applyLiveLatencyCorrection()
       } else {
         liveEdgeLatencySeconds = nil
         edgeLatencyLowConfidenceStreak = 0
@@ -731,34 +725,17 @@ extension PlayerView {
     } else {
       liveEdgeLatencySeconds = nil
       edgeLatencyLowConfidenceStreak = 0
-      applyLiveLatencyCorrection(
-        item: item,
-        range: nil,
-        wallClockLatency: wallClockLatencySeconds,
-        liveEdgeLatency: nil
-      )
+      applyLiveLatencyCorrection()
     }
   }
 
-  /// Keeps playback close to the live edge without constant hard seeks.
-  func applyLiveLatencyCorrection(
-    item: AVPlayerItem,
-    range: CMTimeRange?,
-    wallClockLatency: Double?,
-    liveEdgeLatency: Double?
-  ) {
+  /// Keeps live playback running at 1.0× without fighting an intentional pause or
+  /// an in-progress scrub. Per-mode catch-up/seek behavior is layered on by the
+  /// active `LivePlaybackPolicy`; the stability-first baseline performs no
+  /// automatic seeks (those can look like user-visible jumps).
+  func applyLiveLatencyCorrection() {
     guard isPlaybackActive else { return }
-    // Never fight an intentional pause or an in-progress scrub: this monitor runs
-    // every tick and force-resetting the rate here would silently resume playback
-    // the instant the viewer pauses or starts scrubbing the rewind bar.
-    guard !isUserPaused, !isScrubbing else { return }
-    // Stability-first policy: do not perform any automatic seeks or rate changes
-    // during playback. Those interventions can look like user-visible jumps.
-    _ = item
-    _ = range
-    _ = wallClockLatency
-    _ = liveEdgeLatency
-    wallClockHighLatencyStreak = 0
+    guard !isUserPaused, !isScrubbing, !isVOD else { return }
     if abs(player.rate - 1.0) > 0.01 {
       player.playImmediately(atRate: 1.0)
     }
