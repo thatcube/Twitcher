@@ -2840,10 +2840,12 @@ struct PlayerView: View {
     withAnimation { isSleeping = false }
     // Resume keeping the screen awake now that the viewer is back.
     setIdleTimer(disabled: true)
-    startPlayback()
-    startLatencyMonitor()
-    startPlaybackWatchdog()
     focus = showControls ? .quality : .video
+    // After a timed pause the live edge has moved on (often a couple of minutes)
+    // and the cached playlist may be stale, so resuming in place leaves us stuck
+    // far "behind live" or stalled. Reload from scratch to snap back to the live
+    // edge and guarantee playback actually restarts.
+    Task { await load(maxAttempts: 2, reason: "wake from sleep", resetMetadata: false) }
   }
 
   /// Dim full-screen "Sleeping" scene shown after a sleep timer fires. Pressing
@@ -4499,19 +4501,36 @@ private struct SleepingScreen: View {
     ]
   }
 
-  // Hard-coded, night-vision-friendly palette.
-  private let skyTop = Color(red: 0.05, green: 0.01, blue: 0.02)
-  private let skyBottom = Color(red: 0.10, green: 0.015, blue: 0.03)
-  private let emberLow = Color(red: 0.30, green: 0.05, blue: 0.05)
-  private let ember = Color(red: 0.62, green: 0.16, blue: 0.14)
-  private let emberSoft = Color(red: 0.72, green: 0.26, blue: 0.20)
+  // Hard-coded, night-vision-friendly palette: warm reds blended with the
+  // Twizz brand purple so it ties back to the logo while staying eye-friendly.
+  private let skyTop = Color(red: 0.06, green: 0.01, blue: 0.04)
+  private let skyBottom = Color(red: 0.08, green: 0.015, blue: 0.07)
+  private let emberLow = Color(red: 0.30, green: 0.05, blue: 0.06)
+  private let ember = Color(red: 0.62, green: 0.16, blue: 0.16)
+  private let emberSoft = Color(red: 0.74, green: 0.28, blue: 0.24)
+  private let brandPurple = Color(red: 0.569, green: 0.275, blue: 1.0)
+  private let purpleGlow = Color(red: 0.42, green: 0.20, blue: 0.78)
+  private let purpleSoft = Color(red: 0.66, green: 0.42, blue: 0.96)
 
+  /// Dim white → warm red → brand purple as `warmth` rises, so the star field
+  /// is a gentle blend of red and purple sparkle.
   private func starColor(_ warmth: Double, opacity: Double) -> Color {
-    // Blend a dim cool white toward warm red.
-    let r = 0.78 + 0.14 * warmth
-    let g = 0.62 - 0.40 * warmth
-    let b = 0.56 - 0.42 * warmth
-    return Color(red: r, green: g, blue: b).opacity(opacity)
+    let cool = (r: 0.92, g: 0.82, b: 0.80)
+    let red = (r: 0.86, g: 0.30, b: 0.28)
+    let purple = (r: 0.64, g: 0.38, b: 0.96)
+    let c: (r: Double, g: Double, b: Double)
+    if warmth < 0.55 {
+      let f = warmth / 0.55
+      c = (cool.r + (red.r - cool.r) * f,
+           cool.g + (red.g - cool.g) * f,
+           cool.b + (red.b - cool.b) * f)
+    } else {
+      let f = (warmth - 0.55) / 0.45
+      c = (red.r + (purple.r - red.r) * f,
+           red.g + (purple.g - red.g) * f,
+           red.b + (purple.b - red.b) * f)
+    }
+    return Color(red: c.r, green: c.g, blue: c.b).opacity(opacity)
   }
 
   var body: some View {
@@ -4530,7 +4549,7 @@ private struct SleepingScreen: View {
           .ignoresSafeArea()
 
         LinearGradient(
-          colors: [skyTop.opacity(0.92), skyBottom.opacity(0.88), Color.black.opacity(0.9)],
+          colors: [skyTop.opacity(0.92), skyBottom.opacity(0.90), Color.black.opacity(0.92)],
           startPoint: .top,
           endPoint: .bottom
         )
@@ -4544,8 +4563,8 @@ private struct SleepingScreen: View {
         .ignoresSafeArea()
 
         RadialGradient(
-          colors: [ember.opacity(0.16), .clear],
-          center: driftB, startRadius: 10, endRadius: 540
+          colors: [purpleGlow.opacity(0.26), .clear],
+          center: driftB, startRadius: 10, endRadius: 560
         )
         .blendMode(.screen)
         .ignoresSafeArea()
@@ -4614,16 +4633,24 @@ private struct SleepingScreen: View {
         .interpolation(.none)
         .scaledToFit()
         .frame(width: 132, height: 132)
-        .opacity(0.80 + 0.15 * pulse)
-        .shadow(color: ember.opacity(0.45), radius: 22)
+        .opacity(0.82 + 0.15 * pulse)
+        .shadow(color: brandPurple.opacity(0.45), radius: 26)
+        .shadow(color: ember.opacity(0.35), radius: 14)
 
       Text("Sleeping")
-        .font(.system(size: 46, weight: .semibold, design: .rounded))
-        .foregroundStyle(ember.opacity(0.70 + 0.20 * pulse))
+        .font(.system(size: 48, weight: .bold, design: .rounded))
+        .foregroundStyle(
+          LinearGradient(
+            colors: [emberSoft.opacity(0.85 + 0.15 * pulse),
+                     purpleSoft.opacity(0.80 + 0.15 * pulse)],
+            startPoint: .leading,
+            endPoint: .trailing
+          )
+        )
 
       Text("Press to resume")
         .font(.system(size: 22, weight: .medium, design: .rounded))
-        .foregroundStyle(emberSoft.opacity(0.45))
+        .foregroundStyle(emberSoft.opacity(0.5))
     }
   }
 }
