@@ -313,6 +313,9 @@ struct PlayerView: View {
   @State private var lastGestureScrollAt = Date.distantPast
   /// Finger position magnitude below this reads as "not touching" (lifted).
   private let chatScrollTouchEpsilon: Double = 0.02
+  /// Per-frame finger movement below this reads as "resting" (no swipe), so a
+  /// held/pressing finger doesn't fight discrete presses.
+  private let chatScrollMoveEpsilon: Double = 0.003
   /// Messages scrolled per unit of finger travel across the trackpad.
   private let chatScrollSwipeSensitivity: Double = 16
   /// When the composer last became focused, used to ignore a stray up-swipe that
@@ -1662,15 +1665,14 @@ struct PlayerView: View {
   }
 
   /// Drive swipe-to-scroll from the Siri Remote trackpad. Runs at ~60 Hz while
-  /// scrolling: it anchors where the finger lands and maps subsequent finger
-  /// travel to scroll position, so the chat follows the swipe and holds still
-  /// when the finger stops. A finger resting at an edge does *not* scroll.
+  /// scrolling and moves the chat by the finger's *per-frame travel*, so the
+  /// chat follows a swipe and a resting/pressing finger (no travel) is left
+  /// completely alone — that way it never fights the discrete press handler.
   private func startTrackpadScrollLoop() {
     guard trackpad.hasController, trackpadScrollTask == nil else { return }
     trackpadScrollTask = Task { @MainActor in
-      var gestureActive = false
-      var anchorY = 0.0
-      var anchorIndex = 0.0
+      var primed = false
+      var lastY = 0.0
       while !Task.isCancelled {
         try? await Task.sleep(for: .milliseconds(16))
         if Task.isCancelled { break }
@@ -1678,38 +1680,39 @@ struct PlayerView: View {
 
         let x = Double(trackpad.horizontalValue)
         let y = Double(trackpad.verticalValue)
-        // A finger resting at center or lifted reports ~(0,0): no swipe in
-        // progress, so nothing scrolls (resting must not move the chat).
+        // ~(0,0) means the finger is centered or lifted — end the current swipe
+        // so the next touch re-baselines instead of jumping.
         guard abs(x) > chatScrollTouchEpsilon || abs(y) > chatScrollTouchEpsilon else {
-          gestureActive = false
+          primed = false
           continue
         }
+        if !primed {
+          primed = true
+          lastY = y
+          continue
+        }
+        let dy = y - lastY
+        lastY = y
+        // Only finger *movement* scrolls. A resting or pressing finger (dy ~ 0)
+        // is left alone so the loop never re-asserts a position and fights the
+        // discrete press/step handler.
+        guard abs(dy) > chatScrollMoveEpsilon else { continue }
+        lastGestureScrollAt = Date()
 
         let msgs = visibleChatMessages
         guard !msgs.isEmpty else { continue }
         let lastIndex = Double(msgs.count - 1)
-
-        if !gestureActive {
-          // Anchor where the finger first lands; scrolling tracks travel from here.
-          gestureActive = true
-          anchorY = y
-          anchorIndex = trackpadScrollIndex
-          continue
-        }
-
-        // Map finger travel to scroll position. Up travel (y increases) scrolls
-        // toward older messages (lower index).
-        let idx = anchorIndex - (y - anchorY) * chatScrollSwipeSensitivity
+        // Up travel (y increases) scrolls toward older messages (lower index).
+        let idx = trackpadScrollIndex - dy * chatScrollSwipeSensitivity
         if idx >= lastIndex {
           resumeChatLive()
           break
         }
         let clamped = max(0, idx)
+        trackpadScrollIndex = clamped
         let target = Int(clamped.rounded())
         guard target != lastSentScrollIndex else { continue }
-        trackpadScrollIndex = clamped
         lastSentScrollIndex = target
-        lastGestureScrollAt = Date()
         chatScrollAnchorID = msgs[target].id
         sendChatScroll(to: msgs[target].id, animated: false)
       }
