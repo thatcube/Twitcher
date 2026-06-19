@@ -337,21 +337,9 @@ struct PlayerView: View {
     get { mon.didRequestPlayback }
     nonmutating set { mon.didRequestPlayback = newValue }
   }
-  var lastHardCatchUpJumpAt: Date {
-    get { mon.lastHardCatchUpJumpAt }
-    nonmutating set { mon.lastHardCatchUpJumpAt = newValue }
-  }
-  var lastWallClockCatchUpAt: Date {
-    get { mon.lastWallClockCatchUpAt }
-    nonmutating set { mon.lastWallClockCatchUpAt = newValue }
-  }
   var edgeLatencyLowConfidenceStreak: Int {
     get { mon.edgeLatencyLowConfidenceStreak }
     nonmutating set { mon.edgeLatencyLowConfidenceStreak = newValue }
-  }
-  var wallClockHighLatencyStreak: Int {
-    get { mon.wallClockHighLatencyStreak }
-    nonmutating set { mon.wallClockHighLatencyStreak = newValue }
   }
   var wallClockLowConfidenceStreak: Int {
     get { mon.wallClockLowConfidenceStreak }
@@ -533,28 +521,13 @@ struct PlayerView: View {
   /// just-arrived DVR window and a full 30-min one both feel the same instead of
   /// the small one being hypersensitive.
   let scrubFullWindowTravelUnits: Double = 4
-  // Latency tuning stays at the proven-stable baseline even in low-latency mode.
   // The latency win comes from the proxy promoting Twitch prefetch segments — not
   // from starving buffers or chasing the edge, both of which caused freezes and
-  // blur on-device. Freeze-free playback is the top priority, then sharpness.
+  // blur on-device. Per-mode buffer/ABR behavior lives in LivePlaybackPolicy;
+  // this is the shared target gap used by live-edge follow + drift recovery.
   let targetLiveEdgeSeconds: Double = 3.5
-  let softCatchUpThresholdSeconds: Double = 8
-  // In low-latency mode the proxy adds prefetch segments to the seekable window,
-  // which inflates the seekable-edge latency metric. A zero-tolerance hard seek
-  // against that inflated edge rebuffers and freezes, so disable hard seeks while
-  // low-latency mode is on and rely on gentle rate correction + a healthy buffer.
-  var hardCatchUpThresholdSeconds: Double {
-    lowLatencyProxyEnabled ? .greatestFiniteMagnitude : 14
-  }
-  let hardCatchUpCooldownSeconds: Double = 20
-  let maxCatchUpRate: Float = 1.04
   let edgeLatencyUnavailableEpsilonSeconds: Double = 0.2
   let edgeLatencyUnavailableSamples = 4
-  let wallClockSoftCatchUpThresholdSeconds: Double = 12
-  let wallClockHardCatchUpThresholdSeconds: Double = 16
-  let wallClockHardCatchUpRequiredSamples = 10
-  let wallClockHardCatchUpCooldownSeconds: Double = 90
-  let targetWallClockSeconds: Double = 6.5
   let wallClockUnavailableSamples = 4
   let wallClockStaleDateDeltaEpsilonSeconds: Double = 0.08
   let wallClockStalePlaybackAdvanceThresholdSeconds: Double = 0.6
@@ -3001,10 +2974,7 @@ final class PlaybackMonitorBox {
   var latencyStableCount = 0
   var isPlaybackActive = false
   var didRequestPlayback = false
-  var lastHardCatchUpJumpAt = Date.distantPast
-  var lastWallClockCatchUpAt = Date.distantPast
   var edgeLatencyLowConfidenceStreak = 0
-  var wallClockHighLatencyStreak = 0
   var wallClockLowConfidenceStreak = 0
   var lastPlaybackDateSample: Date?
   var lastPlaybackTimeSampleSeconds: Double?
