@@ -15,10 +15,14 @@ struct GoLiveToastView: View {
 
   @FocusState private var watchFocused: Bool
 
+  /// Large channel avatar; the toast's height tracks it (avatar + equal inset).
+  private let avatarSize: CGFloat = 76
+  /// Equal gap between the avatar and the toast's top, bottom, and leading edges.
+  private let avatarInset: CGFloat = 8
+
   var body: some View {
-    HStack(spacing: 18) {
-      Icon(glyph: .broadcast, size: 34)
-        .foregroundStyle(.red)
+    HStack(spacing: 16) {
+      avatar
 
       VStack(alignment: .leading, spacing: 2) {
         Text(event.headline)
@@ -42,9 +46,9 @@ struct GoLiveToastView: View {
       .buttonStyle(.borderedProminent)
       .focused($watchFocused)
     }
-    .padding(.leading, 28)
-    .padding(.trailing, 18)
-    .padding(.vertical, 16)
+    .padding(.leading, avatarInset)
+    .padding(.vertical, avatarInset)
+    .padding(.trailing, 24)
     .background {
       if #available(tvOS 26.0, *) {
         Capsule().glassEffect(.regular, in: Capsule())
@@ -59,5 +63,19 @@ struct GoLiveToastView: View {
       try? await Task.sleep(for: .milliseconds(350))
       watchFocused = true
     }
+  }
+
+  private var avatar: some View {
+    CachedAsyncImage(url: event.profileImageURL) { image in
+      image.resizable().scaledToFill()
+    } placeholder: {
+      ZStack {
+        Circle().fill(.ultraThinMaterial)
+        Icon(glyph: .broadcast, size: avatarSize * 0.45)
+          .foregroundStyle(.red)
+      }
+    }
+    .frame(width: avatarSize, height: avatarSize)
+    .clipShape(Circle())
   }
 }
