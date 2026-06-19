@@ -188,7 +188,6 @@ extension PlayerView {
 
   // MARK: - Shared card
 
-  @ViewBuilder
   private func momentCard<Trailing: View, Content: View>(
     glyph: Glyph,
     kicker: String,
@@ -198,16 +197,29 @@ extension PlayerView {
     @ViewBuilder trailing: () -> Trailing = { EmptyView() },
     @ViewBuilder content: () -> Content
   ) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(spacing: 8) {
-        Icon(glyph: glyph, size: 22)
-          .foregroundStyle(tint)
-        Text(kicker.uppercased())
-          .font(.caption2).bold()
-          .tracking(1.1)
-          .foregroundStyle(tint)
-        Spacer(minLength: 8)
-        trailing()
+    let kickerRow = HStack(spacing: 8) {
+      Icon(glyph: glyph, size: 22)
+        .foregroundStyle(tint)
+      Text(kicker.uppercased())
+        .font(.caption2).bold()
+        .tracking(1.1)
+        .foregroundStyle(tint)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    return VStack(alignment: .leading, spacing: 10) {
+      // Keep the trailing accessory (e.g. the Hype Train timer) on the kicker
+      // row when it fits, but let it flow onto its own line once the chat pane
+      // is too narrow (the panel is user-resizable down to 300pt).
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 8) {
+          kickerRow
+          Spacer(minLength: 8)
+          trailing()
+        }
+        VStack(alignment: .leading, spacing: 6) {
+          kickerRow
+          trailing()
+        }
       }
       Text(title)
         .font(.headline)
