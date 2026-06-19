@@ -125,31 +125,34 @@ broadcaster can never produce a false trip):**
    (`stalledRefreshPoints = 1.5`).
 2. **Irregular `#EXTINF`** — a listed segment deviates from
    `#EXT-X-TARGETDURATION` by more than `segmentDurationToleranceFraction` (0.5 ⇒
-   a 2s-target segment shorter than 1.0s or longer than 3.0s). A steady encoder
-   emits near-exact target-length segments; a struggling one does not. The final
-   listed segment is excluded (a live tail can be a legitimate partial) and at
-   least `minSegmentsForDurationCheck` (3) segments are required
-   (`irregularRefreshPoints = 1.0`). **Streak escalation (the primary bad-encoder
-   signal — shxtou's dominant manifest reason on-device):** the *second and each
-   subsequent consecutive* off-cadence refresh scores `irregularStreakRefreshPoints`
-   (2.0) instead of the base 1.0, and a clean refresh *decays* the streak by one
-   (rather than hard-resetting), so an encoder that is off-cadence frequently — but
-   not on literally every refresh — still builds toward the escalating tier.
-   Conversely, the *isolated* (first-of-a-run) contribution is capped at
-   `irregularIsolatedScoreCap` (1.0): no matter how many isolated off-cadence
-   refreshes a window contains (e.g. the splice-in and splice-out boundaries of an
-   ad break), together they add at most 1.0. This separates a genuinely struggling
-   encoder (sustained jitter ⇒ 1.0 + 2.0 + 2.0 = 5.0, trips with margin) from an
-   ad splice (isolated boundary refreshes, capped at 1.0) by their **time
-   signature** rather than by a flat score — sustained jitter crosses the
-   threshold while spaced splices cannot accumulate to it.
+   a 2s-target segment shorter than 1.0s or longer than 3.0s). The final listed
+   segment is excluded (a live tail can be a legitimate partial) and at least
+   `minSegmentsForDurationCheck` (3) segments are required (`irregularRefreshPoints
+   = 1.0`). **This is a weak, non-discriminating signal — it does NOT distinguish a
+   bad encoder from a good one.** On-device, a known-good Rocket League stream read
+   `Predict: … irregular EXTINF` on essentially every refresh while playing
+   flawlessly, exactly like the struggling shxtou encoder. Because off-cadence
+   `#EXTINF` fires on good and bad streams alike, its **total** contribution is
+   hard-capped at `irregularIsolatedScoreCap` (1.0), so it can **never** trip the
+   predictor on its own no matter how sustained the jitter — it only adds weight
+   beside the discriminating signal (a stalled media sequence). A genuine
+   bad encoder that merely jitters segment durations is left to the reactive
+   watchdog (stalls + backward jumps).
+
+   > **History:** an earlier revision escalated *consecutive* off-cadence refreshes
+   > (1.0 → 2.0 → …) so sustained irregular `#EXTINF` could solo-trip, aiming to
+   > catch shxtou predictively. On-device this false-tripped known-good channels
+   > (Rocket League etc.) — dropping low latency on flawless streams — because
+   > irregular `#EXTINF` turned out not to discriminate good from bad. The
+   > escalation was removed; irregular `#EXTINF` is now a capped, corroborating
+   > signal only.
 3. **New discontinuities** — the cumulative discontinuity count
    (`#EXT-X-DISCONTINUITY-SEQUENCE` + in-window `#EXT-X-DISCONTINUITY`) grew since
    the last refresh, i.e. the encoder broke timeline continuity again
    (`discontinuityRefreshPoints = 0.75`). **Capped at `discontinuityScoreCap`
    (1.5), below the trip threshold**, so a normal ad break (which inserts
    discontinuities) can contribute but can never trip the predictor on its own.
-   With the irregular isolated cap above, the worst-case ad break — off-cadence
+   With the irregular cap above, the worst-case ad break — off-cadence
    segments *and* a discontinuity at both boundaries — tops out at 1.0 + 1.5 = 2.5,
    still below the 3.0 threshold.
 

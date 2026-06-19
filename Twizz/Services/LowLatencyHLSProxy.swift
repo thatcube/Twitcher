@@ -96,29 +96,23 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     /// struggling encoder (several bad refreshes) trips within the first few
     /// refreshes (~6-8s) while a single ad break or a flawless stream never does.
     static let predictedUnstableScoreThreshold = 3.0
-    /// A refresh whose newly-listed segments are off-cadence (see
-    /// `segmentDurationToleranceFraction`) scores this much on its own…
+    /// An off-cadence refresh (see `segmentDurationToleranceFraction`) scores this
+    /// much. **Irregular `#EXTINF` is a weak, non-discriminating signal:** real
+    /// known-good Twitch channels read "irregular EXTINF" on essentially every
+    /// refresh, exactly like a struggling encoder (verified on a healthy Rocket
+    /// League stream — `Predict: … irregular EXTINF` every refresh while the stream
+    /// was flawless). It therefore must never be able to trip the predictor on its
+    /// own; it only nudges the score toward a verdict that the *discriminating*
+    /// signals (a non-advancing media sequence) lead.
     static let irregularRefreshPoints = 1.0
-    /// …but the *second and each subsequent consecutive* off-cadence refresh
-    /// scores this (higher) amount instead. A struggling encoder produces
-    /// *sustained* jitter across refreshes, whereas a mid-roll ad splice perturbs
-    /// a single refresh (or two) and then normalizes — so escalating a streak
-    /// separates the two by their **time signature** rather than by a flat score,
-    /// letting genuine sustained jitter cross the threshold while keeping an
-    /// isolated splice refresh down at `irregularRefreshPoints`. Two consecutive
-    /// irregular refreshes total 1.0 + 2.0 = 3.0 (the third refresh trips), while
-    /// an isolated one stays at 1.0. A clean refresh *decays* the streak by one
-    /// (not a hard reset), so an encoder that is off-cadence frequently — but not
-    /// on literally every refresh — still builds toward the escalating tier, while
-    /// a lone splice refresh surrounded by clean ones never reaches it.
-    static let irregularStreakRefreshPoints = 2.0
-    /// The *isolated* (non-consecutive, first-of-a-run) off-cadence refreshes in a
-    /// window can together contribute at most this much to the score. A struggling
-    /// encoder trips via the escalating streak tier above; an ad break — whose
-    /// off-cadence refreshes are isolated splice boundaries separated by clean ad
-    /// segments — is held under this cap (1.0). Combined with `discontinuityScoreCap`
-    /// (1.5), a worst-case ad break with off-cadence segments at *both* its splice-in
-    /// and splice-out boundaries still tops out at 2.5, below the 3.0 threshold.
+    /// Hard cap on the *total* score that off-cadence refreshes may contribute in a
+    /// window. Because irregular `#EXTINF` fires on good and bad streams alike, its
+    /// cumulative contribution is held below `predictedUnstableScoreThreshold` so it
+    /// can never solo-trip — however sustained the jitter. A genuinely struggling
+    /// encoder is caught by the media-sequence-stall signal and the reactive
+    /// watchdog, not by duration jitter. Combined with `discontinuityScoreCap`
+    /// (1.5), a worst-case ad break (off-cadence + discontinuity at both splice
+    /// boundaries) still tops out at 2.5, below the 3.0 threshold.
     static let irregularIsolatedScoreCap = 1.0
     /// A refresh that introduces a new `#EXT-X-DISCONTINUITY` scores this much…
     static let discontinuityRefreshPoints = 0.75
@@ -151,11 +145,8 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         var discontinuityScore = 0.0
         var lastTailSequence: Int?
         var lastDiscontinuityTotal: Int?
-        /// Consecutive off-cadence refreshes seen so far, for streak escalation.
-        /// Decays by one on a clean refresh rather than hard-resetting.
-        var irregularStreak = 0
-        /// Cumulative score contributed by *isolated* off-cadence refreshes,
-        /// capped at `irregularIsolatedScoreCap`.
+        /// Cumulative score contributed by off-cadence refreshes, capped at
+        /// `irregularIsolatedScoreCap` so irregular `#EXTINF` can never solo-trip.
         var irregularIsolatedScore = 0.0
         var predicted = false
         var finalized = false
@@ -594,7 +585,11 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
 
         // (2) Off-cadence segment durations. Exclude the final listed segment — a
         // live tail can legitimately be a short partial — and require a few
-        // segments before judging.
+        // segments before judging. Irregular #EXTINF is NON-DISCRIMINATING (healthy
+        // Twitch channels read off-cadence every refresh too), so its total
+        // contribution is capped at irregularIsolatedScoreCap and can never on its
+        // own reach the trip threshold — it only adds weight beside the strong
+        // signals (a stalled media sequence, discontinuities).
         if parsed.segments.count >= Self.minSegmentsForDurationCheck {
             let target = targetDurationSeconds(parsed)
             if target > 0 {
@@ -603,34 +598,12 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
                     abs(seg.duration - target) / target > Self.segmentDurationToleranceFraction
                 }
                 if offCadence {
-                    state.irregularStreak += 1
-                    if state.irregularStreak >= 2 {
-                        // Sustained jitter across consecutive refreshes is a
-                        // genuinely struggling encoder: escalate, banked into the
-                        // running score so two consecutive off-cadence refreshes
-                        // (1.0 + 2.0 = 3.0) clear the threshold by the third.
-                        state.score += Self.irregularStreakRefreshPoints
-                    } else {
-                        // The first off-cadence refresh of a run scores the base
-                        // amount, but the isolated-contribution bucket is capped:
-                        // repeated *isolated* off-cadence refreshes (e.g. the two
-                        // boundaries of an ad break, spaced by clean refreshes)
-                        // can never accumulate past irregularIsolatedScoreCap, so
-                        // an ad break can't reach the threshold via irregular
-                        // points the way sustained jitter does.
-                        let add = min(
-                            Self.irregularRefreshPoints,
-                            Self.irregularIsolatedScoreCap - state.irregularIsolatedScore)
-                        state.irregularIsolatedScore += add
-                        state.score += add
-                    }
+                    let add = min(
+                        Self.irregularRefreshPoints,
+                        Self.irregularIsolatedScoreCap - state.irregularIsolatedScore)
+                    state.irregularIsolatedScore += add
+                    state.score += add
                     state.lastReason = "irregular EXTINF"
-                } else {
-                    // A clean refresh decays the streak rather than resetting it,
-                    // so a frequently-but-not-always off-cadence encoder still
-                    // builds toward the escalating tier, while a lone splice
-                    // refresh surrounded by clean ones can never reach it.
-                    state.irregularStreak = max(0, state.irregularStreak - 1)
                 }
             }
         }
