@@ -60,11 +60,16 @@ final class GoLiveWatcher {
   private var pollTask: Task<Void, Never>?
   private var dismissTask: Task<Void, Never>?
 
+  /// Auth captured by the active watch, so debug helpers can resolve metadata
+  /// (e.g. avatars) on demand. Weak: `HomeView` owns the session.
+  private weak var auth: TwitchAuthSession?
+
   /// Begin polling on behalf of `auth`. Replaces any existing watch. A no-op
   /// (after teardown) cadence keeps running and simply skips work while the
   /// viewer is signed out, so it resumes automatically after sign-in.
   func start(using auth: TwitchAuthSession) {
     stop()
+    self.auth = auth
     pollTask = Task { [weak self] in
       guard let self else { return }
       while !Task.isCancelled {
@@ -106,7 +111,21 @@ final class GoLiveWatcher {
   /// Targets a near-24/7 channel (Monstercat) so "Watch" lands on a genuinely
   /// live stream.
   func simulateGoLive() {
-    enqueue(GoLiveEvent(login: "monstercat", displayName: "Monstercat", gameName: "Music"))
+    Task { [weak self] in
+      guard let self else { return }
+      var profileURL: URL?
+      if let auth = self.auth, auth.isAuthenticated,
+         let token = await self.accessToken(auth: auth),
+         let clientID = self.resolveClientID() {
+        profileURL = (try? await self.fetchProfileImages(
+          clientID: clientID, accessToken: token,
+          query: [URLQueryItem(name: "login", value: "monstercat")]))?.values.first
+      }
+      self.enqueue(
+        GoLiveEvent(
+          login: "monstercat", displayName: "Monstercat", gameName: "Music",
+          profileImageURL: profileURL))
+    }
   }
 
   // MARK: - Polling
@@ -154,16 +173,24 @@ final class GoLiveWatcher {
     guard !newlyLive.isEmpty else { return }
 
     let suppressed = suppressedLogin?.lowercased()
-    let events = liveStreams
+    let freshStreams = liveStreams
       .filter { newlyLive.contains($0.userLogin.lowercased()) }
       .filter { $0.userLogin.lowercased() != suppressed }
-      .map {
-        GoLiveEvent(
-          login: $0.userLogin.lowercased(),
-          displayName: $0.userName.isEmpty ? $0.userLogin : $0.userName,
-          gameName: $0.gameName
-        )
-      }
+    guard !freshStreams.isEmpty else { return }
+
+    // Resolve avatars for just the channels that went live (best-effort).
+    let avatars = (try? await fetchProfileImages(
+      clientID: clientID, accessToken: token,
+      query: freshStreams.map { URLQueryItem(name: "id", value: $0.userID) })) ?? [:]
+
+    let events = freshStreams.map {
+      GoLiveEvent(
+        login: $0.userLogin.lowercased(),
+        displayName: $0.userName.isEmpty ? $0.userLogin : $0.userName,
+        gameName: $0.gameName,
+        profileImageURL: avatars[$0.userID]
+      )
+    }
 
     for event in events { enqueue(event) }
   }
@@ -206,6 +233,37 @@ final class GoLiveWatcher {
       return nil
     }
     return trimmed
+  }
+
+  /// Fetch channel avatars via Helix Get Users. `query` selects the users
+  /// (`id` or `login` items, batched ≤100). Returns user id -> avatar URL.
+  private func fetchProfileImages(
+    clientID: String, accessToken: String, query: [URLQueryItem]
+  ) async throws -> [String: URL] {
+    guard !query.isEmpty else { return [:] }
+
+    var components = URLComponents(string: "https://api.twitch.tv/helix/users")!
+    components.queryItems = Array(query.prefix(100))
+
+    var req = URLRequest(url: components.url!)
+    req.httpMethod = "GET"
+    req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+    req.setValue(clientID, forHTTPHeaderField: "Client-Id")
+    req.setValue("application/json", forHTTPHeaderField: "Accept")
+    req.setValue("Twizz/0.1 tvOS", forHTTPHeaderField: "User-Agent")
+
+    let (data, response) = try await URLSession.shared.data(for: req)
+    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+    guard (200...299).contains(status) else { throw GoLiveRequestError(status: status) }
+
+    let payload = try JSONDecoder().decode(GoLiveUsersEnvelope.self, from: data)
+    return Dictionary(
+      uniqueKeysWithValues: payload.data.compactMap { user -> (String, URL)? in
+        guard let raw = user.profileImageURL, !raw.isEmpty, let url = URL(string: raw) else {
+          return nil
+        }
+        return (user.id, url)
+      })
   }
 
   // MARK: - Queue / countdown
@@ -263,15 +321,31 @@ private struct GoLiveStreamsEnvelope: Decodable {
 }
 
 private struct GoLiveStream: Decodable {
+  let userID: String
   let userLogin: String
   let userName: String
   let gameName: String
   let type: String
 
   private enum CodingKeys: String, CodingKey {
+    case userID = "user_id"
     case userLogin = "user_login"
     case userName = "user_name"
     case gameName = "game_name"
     case type
+  }
+}
+
+private struct GoLiveUsersEnvelope: Decodable {
+  let data: [GoLiveUser]
+}
+
+private struct GoLiveUser: Decodable {
+  let id: String
+  let profileImageURL: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case id
+    case profileImageURL = "profile_image_url"
   }
 }

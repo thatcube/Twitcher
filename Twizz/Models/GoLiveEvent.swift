@@ -8,6 +8,15 @@ struct GoLiveEvent: Equatable, Identifiable {
   let login: String
   let displayName: String
   let gameName: String
+  /// Channel avatar shown in the toast, when resolved.
+  let profileImageURL: URL?
+
+  init(login: String, displayName: String, gameName: String, profileImageURL: URL? = nil) {
+    self.login = login
+    self.displayName = displayName
+    self.gameName = gameName
+    self.profileImageURL = profileImageURL
+  }
 
   var id: String { login }
 
