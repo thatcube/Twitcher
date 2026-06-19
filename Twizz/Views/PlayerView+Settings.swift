@@ -228,6 +228,20 @@ extension PlayerView {
           }
           .frame(maxWidth: .infinity, alignment: .leading)
 
+          // EXPERIMENTAL: synthesize an Apple LL-HLS playlist (blocking reload +
+          // EXT-X-PART) instead of plain prefetch promotion, so it can be A/B'd
+          // on-device against the current path. Default OFF; needs the Prefetch
+          // Proxy on, and is mutually exclusive with Stream Rewind. See
+          // docs/low-latency.md.
+          settingsPill(
+            title: llhlsExperimentEnabled ? "LL-HLS Experiment On" : "LL-HLS Experiment Off",
+            isSelected: llhlsExperimentEnabled,
+            focusTag: .chatLLHLSToggle
+          ) {
+            llhlsExperimentEnabled.toggle()
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
           // Debug-only: outgoing raids can't be triggered on demand, so this
           // injects a simulated one (raiding to Monstercat, a near-24/7 stream)
           // to exercise the auto-follow banner + redirect. Visible only while the

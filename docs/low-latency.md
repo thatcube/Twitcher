@@ -203,6 +203,73 @@ matching the Twitch app's ~5–7s is unlikely on AVPlayer/tvOS. Being a few
 seconds behind the freshest segment is the realistic target. This is the same
 wall Frosty's native (non-web-view) path hits.
 
+## Apple LL-HLS experiment (`llhlsExperimentEnabled`, default OFF)
+
+A research spike asked whether we can drop below the ~11s floor by handing
+AVPlayer a **native Apple LL-HLS** media playlist (RFC 8216bis: blocking playlist
+reload + partial segments) synthesized inside `LowLatencyHLSProxy` from Twitch's
+existing low-latency feed — instead of the prefetch-promotion path. AVPlayer
+natively supports LL-HLS, so no MSE/web view is needed: if a media playlist
+advertises `#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES`, `#EXT-X-PART-INF`,
+per-part `#EXT-X-PART`, and `#EXT-X-PRELOAD-HINT`, AVPlayer issues blocking
+reloads with `_HLS_msn`/`_HLS_part` and consumes parts as they appear.
+
+### What was built (behind the flag)
+
+- **LL-HLS synthesis** (`LowLatencyHLSProxy.llhlsSynthesis`). The media playlist
+  is rewritten to emit `#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK`,
+  `#EXT-X-PART-INF:PART-TARGET`, `#EXT-X-VERSION:9`, an `#EXT-X-PART`
+  (`INDEPENDENT=YES`) per recent segment + per already-available prefetch, and a
+  trailing `#EXT-X-PRELOAD-HINT:TYPE=PART` for the freshest prefetch.
+- **Blocking playlist reload** (`pollBlockingReload`). When AVPlayer requests the
+  playlist with `_HLS_msn`/`_HLS_part`, the resource loader strips those params
+  (Twitch upstream rejects them), then **holds the request open**, re-polling
+  Twitch every 250 ms until the synthesized playlist advertises that media
+  sequence (`availableMSN`) or a 5 s deadline passes, then returns. This is the
+  crux: it lets AVPlayer fetch the bleeding edge the instant Twitch publishes it
+  rather than waiting out a normal poll interval.
+- **Wiring.** `makeItem` gates `synthesizeLLHLS = llhlsExperimentEnabled &&
+  lowLatencyProxyEnabled && !isStreamUnstable && !streamRewindEnabled`. It is
+  mutually exclusive with DVR retention and supersedes plain promotion when on;
+  every existing path (promotion, DVR/Stream Rewind, stability fallback) is
+  untouched when the flag is off. Toggle lives under the Diagnostics overlay
+  ("LL-HLS Experiment"); the diagnostics Mode line reads
+  "LL-HLS experiment (blocking reload)".
+
+### Established facts (verified) — why this can't reach sub-second
+
+- **No transmuxer ⇒ no true sub-second parts.** Twitch `fast_bread` emits whole
+  ~2s `.ts` segments and 1–2 `#EXT-X-TWITCH-PREFETCH` URLs that each point at a
+  whole *upcoming* segment. We cannot subdivide a 2s segment into valid
+  `INDEPENDENT` sub-second parts without remuxing (it requires parsing the TS for
+  GOP/PES boundaries, byte ranges, and IDR alignment). So each part we can
+  honestly advertise is a whole ~2s segment.
+- **`PART-HOLD-BACK` ≥ 3× `PART-TARGET` (RFC 8216bis 4.4.4.7) negates the
+  hold-back win with coarse parts.** With whole-segment parts, `PART-TARGET` ≈ 2s,
+  so `PART-HOLD-BACK` ≥ ~6s — **identical** to the standard `3× TARGETDURATION`
+  hold-back AVPlayer already applies on the promotion path. The lever that makes
+  real LL-HLS low-latency (a sub-second hold-back) is unavailable to us.
+- **Net: the only remaining lever is blocking-reload discovery latency** (plus
+  the preload-hint, which is the same mechanism): removing the ~½ target (~1s
+  average) AVPlayer otherwise waits between a segment going live and discovering
+  it on a normal reload. Theoretical ceiling of the whole exercise is therefore
+  ~0.5–1.5s, **not** the sub-second Twitch-app experience — and the existing
+  prefetch promotion already pulls the live edge in, so this is an *incremental*
+  refinement on top, not a step change.
+
+### Open question (needs on-device A/B)
+
+Whether that ~0.5–1.5s theoretical win actually materializes — and whether
+AVPlayer's LL-HLS engine stays stable when fed coarse 2s "parts" with a ~6s
+hold-back (an unusual shape its engine isn't tuned for) — can only be settled on
+a real stream on-device. That is why it shipped behind a **default-OFF** flag with
+the latency surfaced in the Diagnostics overlay (Edge gap / Encoder): A/B it
+against the normal promotion path on the same channel and compare. If it does not
+beat promotion (or destabilizes), the promotion path remains the real, stable
+win and this stays an experiment. The synthesis + blocking-reload param parsing
+are unit-tested (`LowLatencyHLSProxyTests`); the on-device latency comparison is
+the remaining unknown.
+
 ## Open questions (NOT yet confirmed — under investigation)
 
 These are hypotheses. Do not treat them as fact until the Diagnostics overlay

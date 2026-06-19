@@ -178,11 +178,18 @@ extension PlayerView {
     // proxy on for DVR — detach the proxy entirely and play the plain Twitch
     // playlist, exactly as a manual "LL proxy off" would.
     let promotePrefetch = lowLatencyProxyEnabled && !isStreamUnstable
-    let useProxy = promotePrefetch || streamRewindEnabled
+    // EXPERIMENTAL Apple LL-HLS synthesis. Mutually exclusive with DVR retention
+    // (it rewrites the playlist into partial-segment form, which the growing-window
+    // DVR rewrite would fight) and suppressed while the stability watchdog has
+    // tripped. It supersedes plain prefetch promotion when on.
+    let synthesizeLLHLS =
+      llhlsExperimentEnabled && lowLatencyProxyEnabled && !isStreamUnstable && !streamRewindEnabled
+    let useProxy = promotePrefetch || streamRewindEnabled || synthesizeLLHLS
     lowLatencyProxy.configure(
-      promotePrefetch: promotePrefetch,
+      promotePrefetch: promotePrefetch && !synthesizeLLHLS,
       retainHistory: streamRewindEnabled,
-      windowSeconds: rewindWindowSeconds
+      windowSeconds: rewindWindowSeconds,
+      synthesizeLLHLS: synthesizeLLHLS
     )
     let assetURL = useProxy ? lowLatencyProxy.proxyURL(for: url) : url
     let asset = AVURLAsset(

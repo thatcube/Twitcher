@@ -38,6 +38,10 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     /// `@AppStorage`/`UserDefaults` key for the Stream Rewind (DVR) toggle.
     static let rewindSettingsKey = "streamRewindEnabled"
 
+    /// `@AppStorage`/`UserDefaults` key for the **experimental** Apple LL-HLS
+    /// synthesis mode (off by default). See `rewriteMediaPlaylistAsLLHLS`.
+    static let llhlsSettingsKey = "llhlsExperimentEnabled"
+
     private static let prefetchTag = "#EXT-X-TWITCH-PREFETCH:"
     private static let streamInfTag = "#EXT-X-STREAM-INF"
     private static let extinfTag = "#EXTINF:"
@@ -96,6 +100,26 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     /// media-playlist URL. Mutated only on `delegateQueue`.
     private var dvrBuffers: [String: DVRBuffer] = [:]
 
+    // MARK: - Apple LL-HLS experiment (off by default)
+
+    /// When true, synthesize an Apple Low-Latency-HLS media playlist
+    /// (`EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD`, `EXT-X-PART-INF`, `EXT-X-PART`,
+    /// `EXT-X-PRELOAD-HINT`) instead of the prefetch-promotion / DVR rewrite, and
+    /// honor AVPlayer's blocking playlist reloads. Mutually exclusive with
+    /// `promotePrefetch` / `retainHistory` (the caller gates this). Experimental.
+    private var synthesizeLLHLS = false
+
+    /// How many of the most recent real segments get `#EXT-X-PART` lines. AVPlayer
+    /// only needs parts near the live edge; emitting them for the whole window
+    /// would bloat the playlist for no benefit.
+    private let llhlsPartSegmentWindow = 3
+    /// Max wall-time to hold a blocking playlist reload before returning whatever
+    /// we have, so a request can never hang AVPlayer (must stay under the
+    /// URLSession timeouts above).
+    private let llhlsBlockingTimeout: TimeInterval = 5
+    /// How often to re-poll Twitch upstream while holding a blocking reload.
+    private let llhlsPollInterval: TimeInterval = 0.25
+
     /// One parsed HLS segment (a real `#EXTINF` segment or a promoted prefetch),
     /// kept as its full text block so per-segment tags (PROGRAM-DATE-TIME,
     /// DISCONTINUITY, …) survive into the rewritten playlist verbatim.
@@ -134,7 +158,12 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     /// Updates the proxy's behavior. Dispatched onto the delegate queue so the
     /// flags are always read consistently with playlist rewriting. Switching
     /// `retainHistory` clears any accumulated DVR history.
-    func configure(promotePrefetch: Bool, retainHistory: Bool, windowSeconds: Double) {
+    func configure(
+        promotePrefetch: Bool,
+        retainHistory: Bool,
+        windowSeconds: Double,
+        synthesizeLLHLS: Bool = false
+    ) {
         delegateQueue.async { [weak self] in
             guard let self else { return }
             self.promotePrefetch = promotePrefetch
@@ -143,6 +172,7 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
             }
             self.retainHistory = retainHistory
             self.dvrWindowSeconds = windowSeconds
+            self.synthesizeLLHLS = synthesizeLLHLS
         }
     }
 
@@ -177,10 +207,22 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
             return false
         }
 
-        var req = URLRequest(url: realURL)
+        // Twitch upstream never understands Apple's blocking-reload query params, so
+        // strip them before fetching. In LL-HLS mode a request that carries them is
+        // a blocking playlist reload: hold it open and poll upstream until the asked
+        // media-sequence/part is available (the crux of the experiment).
+        let upstream = upstreamURLStrippingBlockingParams(realURL)
+        let key = ObjectIdentifier(loadingRequest)
+
+        if synthesizeLLHLS, let target = blockingReloadTarget(from: requestURL) {
+            let deadline = Date().addingTimeInterval(llhlsBlockingTimeout)
+            pollBlockingReload(loadingRequest, upstream: upstream, target: target, key: key, deadline: deadline)
+            return true
+        }
+
+        var req = URLRequest(url: upstream)
         for (key, value) in upstreamHeaders { req.setValue(value, forHTTPHeaderField: key) }
 
-        let key = ObjectIdentifier(loadingRequest)
         let task = session.dataTask(with: req) { [weak self] data, response, error in
             guard let self else { return }
             self.delegateQueue.async {
@@ -199,7 +241,7 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
                 }
 
                 let text = String(decoding: data, as: UTF8.self)
-                let rewritten = self.rewrite(playlist: text, sourceURL: realURL)
+                let rewritten = self.rewrite(playlist: text, sourceURL: upstream)
                 self.fulfill(loadingRequest, with: rewritten)
             }
         }
@@ -208,6 +250,60 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         }
         task.resume()
         return true
+    }
+
+    // MARK: - LL-HLS blocking playlist reload
+
+    /// Holds a blocking playlist reload open, re-polling Twitch upstream every
+    /// `llhlsPollInterval` until the synthesized LL-HLS playlist advertises the
+    /// requested media-sequence (or `deadline` passes), then returns it. This is
+    /// what lets AVPlayer fetch the bleeding edge the instant Twitch publishes it
+    /// instead of waiting out a normal poll interval. Runs on `delegateQueue`.
+    private func pollBlockingReload(
+        _ loadingRequest: AVAssetResourceLoadingRequest,
+        upstream: URL,
+        target: (msn: Int, part: Int),
+        key: ObjectIdentifier,
+        deadline: Date
+    ) {
+        if loadingRequest.isFinished || loadingRequest.isCancelled {
+            tasks[key] = nil
+            return
+        }
+
+        var req = URLRequest(url: upstream)
+        for (k, value) in upstreamHeaders { req.setValue(value, forHTTPHeaderField: k) }
+
+        let task = session.dataTask(with: req) { [weak self] data, response, error in
+            guard let self else { return }
+            self.delegateQueue.async {
+                self.tasks[key] = nil
+                if loadingRequest.isFinished || loadingRequest.isCancelled { return }
+
+                guard let data, error == nil else {
+                    loadingRequest.finishLoading(with: error)
+                    return
+                }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+                guard (200...299).contains(status) else {
+                    loadingRequest.finishLoading(with: PlaybackError.http(status))
+                    return
+                }
+
+                let text = String(decoding: data, as: UTF8.self)
+                let synthesis = self.llhlsSynthesis(from: text)
+                if synthesis.availableMSN >= target.msn || Date() >= deadline {
+                    self.fulfill(loadingRequest, with: synthesis.data)
+                } else {
+                    self.delegateQueue.asyncAfter(deadline: .now() + self.llhlsPollInterval) {
+                        self.pollBlockingReload(
+                            loadingRequest, upstream: upstream, target: target, key: key, deadline: deadline)
+                    }
+                }
+            }
+        }
+        tasks[key] = task
+        task.resume()
     }
 
     func resourceLoader(
@@ -227,6 +323,9 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     private func rewrite(playlist text: String, sourceURL: URL) -> Data {
         if text.contains(Self.streamInfTag) {
             return rewriteMasterPlaylist(text)
+        }
+        if synthesizeLLHLS {
+            return llhlsSynthesis(from: text).data
         }
         return rewriteMediaPlaylist(text, sourceURL: sourceURL)
     }
@@ -430,6 +529,132 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         return Self.segmentStartTags.contains { trimmed.hasPrefix($0) }
     }
 
+    // MARK: - Apple LL-HLS synthesis
+
+    /// Synthesizes an Apple Low-Latency-HLS media playlist from a Twitch live
+    /// media playlist, and reports the highest media sequence whose content is
+    /// actually available (used to satisfy blocking reloads).
+    ///
+    /// Mapping (coarse-part model — see docs/low-latency.md "Findings"):
+    /// - We have no transmuxer, so each whole ~2s Twitch segment becomes ONE
+    ///   independent `#EXT-X-PART` (`PART-TARGET` = the segment duration). We
+    ///   cannot produce true sub-second parts.
+    /// - Real segments stay as `#EXTINF` segments; the most recent
+    ///   `llhlsPartSegmentWindow` of them additionally get an `#EXT-X-PART` line so
+    ///   AVPlayer has parts near the live edge.
+    /// - Twitch advertises 1-2 `#EXT-X-TWITCH-PREFETCH` URLs (near-ready upcoming
+    ///   segments). All but the freshest are emitted as available parts +
+    ///   `#EXTINF` segments; the FRESHEST becomes the trailing
+    ///   `#EXT-X-PRELOAD-HINT:TYPE=PART` — the part AVPlayer pre-requests and that
+    ///   our blocking reload holds until Twitch publishes it.
+    /// - `CAN-BLOCK-RELOAD=YES` + `PART-HOLD-BACK` (>= 3x PART-TARGET per
+    ///   RFC 8216bis) advertise LL-HLS so AVPlayer issues blocking reloads.
+    func llhlsSynthesis(from text: String) -> (data: Data, availableMSN: Int) {
+        let parsed = parseMediaPlaylist(text)
+        let partTarget = representativePartDuration(parsed)
+        // RFC 8216bis 4.4.4.7: PART-HOLD-BACK MUST be >= 3x PART-TARGET.
+        let holdBack = partTarget * 3
+
+        // The freshest prefetch is held back as the preload-hint (the part still
+        // being produced); earlier prefetches are already-available parts.
+        let availableParts = parsed.prefetch.dropLast()
+        let preloadHint = parsed.prefetch.last
+
+        var out = llhlsHeader(parsed.header, partTarget: partTarget, holdBack: holdBack)
+
+        let partWindowStart = max(0, parsed.segments.count - llhlsPartSegmentWindow)
+        for (i, seg) in parsed.segments.enumerated() {
+            if i >= partWindowStart {
+                out.append(llhlsPartLine(uri: seg.url, duration: seg.duration))
+            }
+            out.append(contentsOf: seg.lines)
+        }
+        for seg in availableParts {
+            out.append(llhlsPartLine(uri: seg.url, duration: seg.duration))
+            out.append(contentsOf: seg.lines)
+        }
+        if let hint = preloadHint {
+            out.append("#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"\(hint.url)\"")
+        }
+
+        // Highest media sequence whose content is in the playlist: the last real
+        // segment, plus each already-available prefetch part (the preload-hint one
+        // is intentionally excluded — it is not yet available).
+        let availableMSN =
+            parsed.mediaSequence + parsed.segments.count - 1 + availableParts.count
+        return (Data(out.joined(separator: "\n").utf8), availableMSN)
+    }
+
+    private func llhlsPartLine(uri: String, duration: Double) -> String {
+        "#EXT-X-PART:DURATION=\(String(format: "%.3f", duration)),URI=\"\(uri)\",INDEPENDENT=YES"
+    }
+
+    /// PART-TARGET / hold-back basis: the average real-segment duration (steady
+    /// near boundaries), falling back to `#EXT-X-TARGETDURATION` then 2s.
+    private func representativePartDuration(_ parsed: ParsedMediaPlaylist) -> Double {
+        if !parsed.segments.isEmpty {
+            return parsed.segments.reduce(0.0) { $0 + $1.duration } / Double(parsed.segments.count)
+        }
+        return 2.0
+    }
+
+    /// Rebuilds the media-playlist header for LL-HLS: bumps `#EXT-X-VERSION` to 9
+    /// (LL-HLS needs >= 6), drops any stale server-control / part-inf tags, and
+    /// inserts `#EXT-X-SERVER-CONTROL` + `#EXT-X-PART-INF` right after `#EXTM3U`.
+    private func llhlsHeader(_ header: [String], partTarget: Double, holdBack: Double) -> [String] {
+        var out: [String] = []
+        var sawVersion = false
+        for raw in header {
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("#EXT-X-VERSION") {
+                out.append("#EXT-X-VERSION:9")
+                sawVersion = true
+            } else if t.hasPrefix("#EXT-X-SERVER-CONTROL") || t.hasPrefix("#EXT-X-PART-INF") {
+                continue
+            } else {
+                out.append(raw)
+            }
+        }
+        var control = [
+            "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=\(String(format: "%.3f", holdBack))",
+            "#EXT-X-PART-INF:PART-TARGET=\(String(format: "%.3f", partTarget))",
+        ]
+        if !sawVersion { control.insert("#EXT-X-VERSION:9", at: 0) }
+
+        if let idx = out.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("#EXTM3U")
+        }) {
+            out.insert(contentsOf: control, at: idx + 1)
+        } else {
+            out.insert(contentsOf: control, at: 0)
+        }
+        return out
+    }
+
+    // MARK: - Blocking-reload query parsing
+
+    /// Parses Apple's blocking-reload params (`_HLS_msn`, optional `_HLS_part`)
+    /// from a playlist request. Returns nil when absent (a non-blocking request).
+    func blockingReloadTarget(from url: URL) -> (msn: Int, part: Int)? {
+        guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              let msnItem = items.first(where: { $0.name == "_HLS_msn" }),
+              let msn = msnItem.value.flatMap({ Int($0) })
+        else { return nil }
+        let part = items.first(where: { $0.name == "_HLS_part" })?.value.flatMap { Int($0) } ?? 0
+        return (msn, part)
+    }
+
+    /// Strips Apple's blocking-reload params before fetching Twitch upstream
+    /// (which would reject the unknown query items).
+    private func upstreamURLStrippingBlockingParams(_ url: URL) -> URL {
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let items = comps.queryItems
+        else { return url }
+        let filtered = items.filter { !$0.name.hasPrefix("_HLS_") }
+        comps.queryItems = filtered.isEmpty ? nil : filtered
+        return comps.url ?? url
+    }
+
     // MARK: - Test seams
 
     /// Synchronously rewrites a master playlist on the delegate queue. Test-only
@@ -453,6 +678,15 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
             self.retainHistory = retainHistory
             self.dvrWindowSeconds = windowSeconds
             return String(decoding: rewriteMediaPlaylist(text, sourceURL: sourceURL), as: UTF8.self)
+        }
+    }
+
+    /// Synchronously synthesizes an LL-HLS playlist on the delegate queue, with
+    /// the highest-available media sequence. Test-only entry point.
+    func llhlsSynthesisForTesting(_ text: String) -> (playlist: String, availableMSN: Int) {
+        delegateQueue.sync {
+            let result = llhlsSynthesis(from: text)
+            return (String(decoding: result.data, as: UTF8.self), result.availableMSN)
         }
     }
 

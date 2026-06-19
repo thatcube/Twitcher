@@ -184,6 +184,9 @@ struct PlayerView: View {
   @State var youtubeAutoResolvedTarget = ""
   @AppStorage(LowLatencyHLSProxy.settingsKey) var lowLatencyProxyEnabled = true
   @AppStorage(LowLatencyHLSProxy.rewindSettingsKey) var streamRewindEnabled = true
+  /// EXPERIMENTAL: synthesize an Apple LL-HLS playlist (blocking reload + parts)
+  /// instead of plain prefetch promotion. Default OFF — research/A-B only.
+  @AppStorage(LowLatencyHLSProxy.llhlsSettingsKey) var llhlsExperimentEnabled = false
   @AppStorage("showLatencyDiagnostics") var showLatencyDiagnostics = false
   /// Live viewer count badge in the top-left HUD. On by default — a glanceable,
   /// non-diagnostic stat most viewers want while watching.
@@ -698,6 +701,7 @@ struct PlayerView: View {
     case chatLayoutOption(Int)
     case chatSyncToggle
     case chatLowLatencyToggle
+    case chatLLHLSToggle
     case chatRewindToggle
     case chatViewerCountToggle
     case chatLatencyToggle
@@ -1202,6 +1206,13 @@ struct PlayerView: View {
       lowLatencyProxy.resetDVR()
       configurePlayerForLive()
       Task { await load(reason: "rewindToggle", resetMetadata: false) }
+    }
+    .onChange(of: llhlsExperimentEnabled) { _, _ in
+      guard !isVOD else { return }
+      // Switching the LL-HLS experiment changes the synthesized playlist shape, so
+      // rebuild the asset pipeline so AVPlayer re-parses it from scratch.
+      configurePlayerForLive()
+      Task { await load(reason: "llhlsToggle", resetMetadata: false) }
     }
     .fullScreenCover(isPresented: $showSignInSheet) {
       SignInView(auth: auth)
@@ -1758,8 +1769,12 @@ struct PlayerView: View {
     var lines: [String] = []
 
     let mode: String
-    if lowLatencyProxyEnabled {
-      mode = isStreamUnstable ? "LL proxy auto-off (unstable)" : "LL proxy ON"
+    if isStreamUnstable {
+      mode = "LL proxy auto-off (unstable)"
+    } else if llhlsExperimentEnabled, lowLatencyProxyEnabled, !streamRewindEnabled {
+      mode = "LL-HLS experiment (blocking reload)"
+    } else if lowLatencyProxyEnabled {
+      mode = "LL proxy ON"
     } else {
       mode = "LL proxy off"
     }
@@ -1958,6 +1973,7 @@ struct PlayerView: View {
       .chatLayoutOption,
       .chatSyncToggle,
       .chatLowLatencyToggle,
+      .chatLLHLSToggle,
       .chatRewindToggle,
       .chatViewerCountToggle,
       .chatLatencyToggle,

@@ -121,4 +121,117 @@ final class LowLatencyHLSProxyTests: XCTestCase {
     XCTAssertTrue(out.contains("URI=\"twizz-ll://video.example/audio.m3u8\""))
     XCTAssertFalse(out.contains("https://video.example/chunked.m3u8"))
   }
+
+  // MARK: - Apple LL-HLS synthesis (experimental)
+
+  /// The synthesized playlist must advertise LL-HLS so AVPlayer engages blocking
+  /// reloads: CAN-BLOCK-RELOAD, PART-INF/PART-TARGET, PART-HOLD-BACK, version >= 6.
+  func testLLHLSEmitsControlTags() {
+    let proxy = makeProxy()
+    let playlist = mediaPlaylist(
+      mediaSequence: 100,
+      segments: [("seg100", 2), ("seg101", 2)],
+      prefetch: ["seg102", "seg103"]
+    )
+    let out = proxy.llhlsSynthesisForTesting(playlist).playlist
+
+    XCTAssertTrue(out.contains("#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES"))
+    XCTAssertTrue(out.contains("PART-HOLD-BACK="))
+    XCTAssertTrue(out.contains("#EXT-X-PART-INF:PART-TARGET="))
+    XCTAssertTrue(out.contains("#EXT-X-VERSION:9"), "LL-HLS requires version >= 6:\n\(out)")
+  }
+
+  /// RFC 8216bis 4.4.4.7: PART-HOLD-BACK MUST be at least 3x PART-TARGET. With our
+  /// coarse whole-segment parts this lands at ~6s — the crux finding that the
+  /// hold-back lever yields no win without sub-second parts.
+  func testLLHLSPartHoldBackIsAtLeastThreePartTarget() {
+    let proxy = makeProxy()
+    let playlist = mediaPlaylist(
+      mediaSequence: 100, segments: [("a", 2), ("b", 2)], prefetch: ["c"])
+    let out = proxy.llhlsSynthesisForTesting(playlist).playlist
+
+    let partTarget = value(after: "PART-TARGET=", in: out)
+    let holdBack = value(after: "PART-HOLD-BACK=", in: out)
+    XCTAssertNotNil(partTarget)
+    XCTAssertNotNil(holdBack)
+    if let pt = partTarget, let hb = holdBack {
+      XCTAssertGreaterThanOrEqual(hb, pt * 3 - 0.001, "hold-back must be >= 3x part-target")
+    }
+  }
+
+  /// Segments + already-available prefetches become INDEPENDENT EXT-X-PARTs; the
+  /// freshest prefetch becomes the trailing PRELOAD-HINT (the part AVPlayer
+  /// pre-requests and the blocking reload holds open).
+  func testLLHLSMapsPartsAndPreloadHint() {
+    let proxy = makeProxy()
+    let playlist = mediaPlaylist(
+      mediaSequence: 100,
+      segments: [("seg100", 2), ("seg101", 2)],
+      prefetch: ["seg102", "seg103"]
+    )
+    let out = proxy.llhlsSynthesisForTesting(playlist).playlist
+
+    XCTAssertTrue(
+      out.contains("#EXT-X-PART:DURATION=2.000,URI=\"https://video.example/seg101.ts\",INDEPENDENT=YES"),
+      "recent real segment should get a part line:\n\(out)")
+    XCTAssertTrue(
+      out.contains("#EXT-X-PART:DURATION=2.000,URI=\"https://video.example/seg102.ts\",INDEPENDENT=YES"),
+      "available prefetch should become an EXT-X-PART:\n\(out)")
+    XCTAssertTrue(
+      out.contains("#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"https://video.example/seg103.ts\""),
+      "freshest prefetch should be the preload hint:\n\(out)")
+    // The preload-hint target must NOT also be advertised as an available part.
+    XCTAssertFalse(
+      out.contains("#EXT-X-PART:DURATION=2.000,URI=\"https://video.example/seg103.ts\""),
+      "the hinted part is not yet available:\n\(out)")
+    XCTAssertFalse(out.contains("#EXT-X-TWITCH-PREFETCH"), "proprietary tag must be gone")
+  }
+
+  /// availableMSN drives blocking-reload satisfaction: last real segment plus each
+  /// already-available prefetch part, excluding the held-back preload-hint one.
+  func testLLHLSAvailableMSNExcludesPreloadHint() {
+    let proxy = makeProxy()
+    // mediaSequence 100, two real segments (last real msn = 101), prefetch
+    // [seg102 (available part), seg103 (preload hint)] -> available msn = 102.
+    let twoHints = proxy.llhlsSynthesisForTesting(
+      mediaPlaylist(
+        mediaSequence: 100, segments: [("seg100", 2), ("seg101", 2)],
+        prefetch: ["seg102", "seg103"])
+    ).availableMSN
+    XCTAssertEqual(twoHints, 102)
+
+    // A single prefetch is held back entirely as the hint, so nothing past the
+    // last real segment is available yet.
+    let oneHint = proxy.llhlsSynthesisForTesting(
+      mediaPlaylist(
+        mediaSequence: 100, segments: [("seg100", 2), ("seg101", 2)], prefetch: ["seg102"])
+    ).availableMSN
+    XCTAssertEqual(oneHint, 101)
+  }
+
+  // MARK: - Blocking-reload query parsing
+
+  func testBlockingReloadTargetParsing() {
+    let proxy = makeProxy()
+    let withParts = URL(string: "twizz-ll://video.example/chunked.m3u8?_HLS_msn=102&_HLS_part=0")!
+    XCTAssertEqual(proxy.blockingReloadTarget(from: withParts)?.msn, 102)
+    XCTAssertEqual(proxy.blockingReloadTarget(from: withParts)?.part, 0)
+
+    let msnOnly = URL(string: "twizz-ll://video.example/chunked.m3u8?_HLS_msn=200")!
+    XCTAssertEqual(proxy.blockingReloadTarget(from: msnOnly)?.msn, 200)
+    XCTAssertEqual(proxy.blockingReloadTarget(from: msnOnly)?.part, 0, "part defaults to 0")
+
+    let plain = URL(string: "twizz-ll://video.example/chunked.m3u8")!
+    XCTAssertNil(proxy.blockingReloadTarget(from: plain), "no blocking params -> nil")
+  }
+
+  // MARK: - Helpers
+
+  /// Extracts the numeric value immediately following `marker` in `text`.
+  private func value(after marker: String, in text: String) -> Double? {
+    guard let range = text.range(of: marker) else { return nil }
+    let rest = text[range.upperBound...]
+    let token = rest.prefix { $0.isNumber || $0 == "." }
+    return Double(token)
+  }
 }
