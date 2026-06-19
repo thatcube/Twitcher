@@ -192,22 +192,22 @@ final class LowLatencyHLSProxyTests: XCTestCase {
     XCTAssertTrue(proxy.predictedUnstable, "a non-advancing media sequence signals a stalled encoder")
   }
 
-  /// Wildly irregular `#EXTINF` durations (a struggling encoder) should trip the
-  /// predictor even while the sequence keeps advancing.
-  func testIrregularSegmentDurationsArePredictedUnstable() {
+  /// Irregular `#EXTINF` is non-discriminating — real known-good Twitch channels
+  /// (e.g. a healthy Rocket League stream) read off-cadence on essentially every
+  /// refresh — so even a long sustained run of off-cadence refreshes must NOT trip
+  /// the predictor on its own. Its total contribution is capped at
+  /// `irregularIsolatedScoreCap` (1.0), well below the 3.0 threshold; a genuine bad
+  /// encoder is caught by the media-sequence-stall signal and the reactive watchdog.
+  func testSustainedIrregularDoesNotSoloTrip() {
     let proxy = makeProxy()
-    let playlists = (0..<5).map { i in
-      instabilityPlaylist(
-        mediaSequence: 100 + i,
-        segments: [
-          (name: "a\(i)", duration: 0.4, discontinuity: false),
-          (name: "b\(i)", duration: 3.6, discontinuity: false),
-          (name: "c\(i)", duration: 2, discontinuity: false),
-        ])
-    }
-    feedRefreshes(proxy, playlists)
+    feedRefreshes(proxy, (0..<12).map(irregularRefresh))
 
-    XCTAssertTrue(proxy.predictedUnstable, "off-cadence segment durations signal a struggling encoder")
+    XCTAssertFalse(
+      proxy.predictedUnstable,
+      "irregular #EXTINF fires on good streams too and must never solo-trip the predictor")
+    XCTAssertEqual(
+      proxy.instabilityDiagnostics.score, LowLatencyHLSProxy.irregularIsolatedScoreCap,
+      accuracy: 0.0001, "off-cadence contribution is capped at 1.0")
   }
 
   /// Helper: a refresh whose body segments are off-cadence (a struggling encoder),
@@ -233,31 +233,26 @@ final class LowLatencyHLSProxyTests: XCTestCase {
       ])
   }
 
-  /// SUSTAINED irregular jitter escalates: the 2nd+ consecutive off-cadence
-  /// refresh scores `irregularStreakRefreshPoints` (2.0) rather than the base 1.0,
-  /// so three consecutive irregular refreshes total 1.0 + 2.0 + 2.0 = 5.0 and trip
-  /// with margin. The score reaching ≥4.5 proves escalation applied (flat 1.0×3
-  /// would total only 3.0).
-  func testSustainedIrregularEscalatesAndTrips() {
+  /// SUSTAINED irregular jitter must NOT solo-trip: with the escalation removed,
+  /// off-cadence refreshes accumulate only up to the isolated cap (1.0). (Kept as a
+  /// distinct case from the 12-refresh test above to guard the 3-consecutive shape
+  /// that previously escalated to 5.0.)
+  func testThreeConsecutiveIrregularStayCapped() {
     let proxy = makeProxy()
     feedRefreshes(proxy, (0..<3).map(irregularRefresh))
 
     let snap = proxy.instabilityDiagnostics
-    XCTAssertTrue(snap.predictedUnstable, "sustained off-cadence jitter should trip the predictor")
-    XCTAssertGreaterThanOrEqual(
-      snap.score, 4.5, "consecutive irregular refreshes should escalate past a flat 3.0")
-    XCTAssertEqual(snap.detail, "irregular EXTINF")
+    XCTAssertFalse(snap.predictedUnstable, "consecutive off-cadence jitter must not trip on its own")
+    XCTAssertEqual(
+      snap.score, LowLatencyHLSProxy.irregularIsolatedScoreCap, accuracy: 0.0001,
+      "irregular contribution is capped at 1.0, not escalated past 3.0")
   }
 
   /// An ad break splices in and out — an irregular refresh here and there with a
-  /// clean run between — must NOT escalate or accumulate: a clean refresh decays
-  /// the streak, and the isolated-contribution bucket is capped at
-  /// `irregularIsolatedScoreCap` (1.0), so *two* isolated irregular refreshes
-  /// together still score only 1.0 (the second is capped out), nowhere near the
-  /// 3.0 that two *consecutive* ones reach via escalation. This is the
-  /// time-signature separation: same count of irregular refreshes, the spaced-out
-  /// ad-break shape can't accumulate while sustained jitter does.
-  func testIsolatedIrregularSplicesDoNotEscalate() {
+  /// clean run between — stays capped: the isolated-contribution bucket tops out at
+  /// `irregularIsolatedScoreCap` (1.0), so *two* off-cadence boundary refreshes
+  /// together still score only 1.0, nowhere near the 3.0 threshold.
+  func testIsolatedIrregularSplicesStayCapped() {
     let proxy = makeProxy()
     // Two irregular refreshes separated by clean ones — splice-in, run, splice-out.
     let playlists = [
