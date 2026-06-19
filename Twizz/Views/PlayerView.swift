@@ -2128,15 +2128,6 @@ struct PlayerView: View {
     let isGlass = chatLayoutMode == .glass
     let useLighterOverlayBackground = chatLayoutMode == .overlay
     return VStack(spacing: 0) {
-      // Live interactive moments (polls / predictions / hype trains / goals)
-      // dock above the chat list so they share its width + glass treatment and
-      // push the messages down when they appear. Only visible while chat is open
-      // (this whole pane is). Passive + non-interactive: never takes focus.
-      if let moment = hermes.currentMoment, !isSleeping {
-        dockedInteractiveMoment(moment, style: momentDockStyle(isGlass: isGlass))
-          .transition(.move(edge: .top).combined(with: .opacity))
-      }
-
       // ChatView is wrapped so the live `chat.messages` read happens inside the
       // wrapper's body, not PlayerView's. Otherwise every incoming chat message
       // (several per second on busy channels) re-executes the whole PlayerView
@@ -2182,6 +2173,17 @@ struct PlayerView: View {
               default: break
               }
             }
+        }
+      }
+      // Live interactive moments (polls / predictions / hype trains / goals)
+      // float over the TOP of the chat list rather than pushing it down, so the
+      // messages scroll behind the card (matching Twitch on the web). Only
+      // visible while chat is open (this whole pane is). Passive +
+      // non-interactive: never takes focus, so chat keeps scrolling underneath.
+      .overlay(alignment: .top) {
+        if let moment = hermes.currentMoment, !isSleeping {
+          dockedInteractiveMoment(moment, style: momentDockStyle(isGlass: isGlass))
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
       }
 
