@@ -140,9 +140,12 @@ of stalling, and the slow-down rides out short buffer dips.
   refill its buffer and then play *forward* from there — so the old "playhead
   isn't advancing" stall check never fired, and the player could sit 120s+ behind
   live indefinitely. `samplePlaybackHealth` now also watches the edge gap while
-  pinned to live and, past a threshold (~45s, safely above normal edge latency),
-  runs a **resync ladder**: a throttled lightweight seek back toward the edge,
-  escalating to a full reload only after repeated failures.
+  pinned to live and, past a threshold (~15s — far above the normal sub-second
+  edge gap and ordinary rebuffer jitter, but low enough to rescue the viewer long
+  before they're a minute behind), runs a **resync ladder**: a throttled
+  lightweight seek back toward the edge (instant recovery the gentle rate
+  catch-up can't achieve for a large hole), escalating to a full reload only after
+  repeated failures.
 - The playback watchdog, on a detected hard freeze, calls
   `recoverFromPlaybackStall`, which does a **full reload** (`load(...)`) and
   restarts playback near the live edge. A reload therefore looks like a large

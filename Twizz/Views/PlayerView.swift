@@ -577,9 +577,13 @@ struct PlayerView: View {
   /// but the playhead has involuntarily fallen this far behind the seekable edge,
   /// snap it back toward live with a lightweight seek instead of waiting for the
   /// frozen-playhead watchdog (which a slow-playing-after-rewind player defeats).
-  /// Set well above any normal latency so it only fires in the genuinely-broken
-  /// "rewound far back and stuck" state, never for ordinary drift.
-  let liveEdgeResyncThresholdSeconds: Double = 45
+  /// The live *edge gap* (distance from the playhead to the seekable tail) sits
+  /// near 0 in normal playback and only a couple seconds during ordinary rebuffer
+  /// jitter, so a gap this large unambiguously means "rewound far back and stuck."
+  /// The gentle rate catch-up can't recover a hole this big (1.12× would take
+  /// minutes), so seek back directly. Kept well above the ~2s catch-up target so
+  /// it never fights ordinary drift.
+  let liveEdgeResyncThresholdSeconds: Double = 15
   /// Minimum spacing between lightweight live-edge resync seeks.
   let liveResyncCooldownSeconds: Double = 6
   /// After this many resync seeks fail to hold the edge, escalate to a full reload.
