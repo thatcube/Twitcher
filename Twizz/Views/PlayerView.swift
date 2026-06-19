@@ -329,6 +329,10 @@ struct PlayerView: View {
     get { mon.latencyStableCount }
     nonmutating set { mon.latencyStableCount = newValue }
   }
+  var latencyOutlierStreak: Int {
+    get { mon.latencyOutlierStreak }
+    nonmutating set { mon.latencyOutlierStreak = newValue }
+  }
   // The real (pre-proxy) source URL of the currently loaded item, so we can tell
   // whether a quality switch actually needs to replace the item. AVURLAsset.url
   // is the rewritten twizz-ll:// URL in low-latency mode, so it can't be used
@@ -550,6 +554,10 @@ struct PlayerView: View {
   let latencyStableSamplesRequired = 2
   let latencyPlausibleFloorSeconds: Double = 2
   let latencyStableDeltaSeconds: Double = 2
+  /// A single latency sample deviating from the smoothed value by at least this
+  /// much is treated as a suspect outlier and held back until corroborated.
+  let latencyOutlierSeconds: Double = 25
+  let latencyOutlierConfirmSamples = 2
   let playbackWatchdogIntervalSeconds: Double = 2
   let hardStallRecoverySeconds: Double = 10
   let recoveryCooldownSeconds: Double = 15
@@ -2977,6 +2985,9 @@ final class PlaybackMonitorBox {
   /// Consecutive samples whose smoothed value barely moved — i.e. the reading
   /// has stopped climbing off the live edge and looks trustworthy.
   var latencyStableCount = 0
+  /// Consecutive samples deviating from the smoothed value by an outlier margin,
+  /// used to hold back a transient latency spike until it is corroborated.
+  var latencyOutlierStreak = 0
   var isPlaybackActive = false
   var didRequestPlayback = false
   var edgeLatencyLowConfidenceStreak = 0
