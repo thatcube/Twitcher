@@ -877,7 +877,7 @@ struct PlayerView: View {
             if let remaining = sleepRemainingSeconds {
               SleepCountdownBadge(text: SleepCountdownBadge.format(seconds: remaining))
             } else if sleepUntilStreamEnds {
-              SleepCountdownBadge(text: "End")
+              SleepCountdownBadge(text: "End of stream")
             }
           }
           if showLatencyDiagnostics {
@@ -2790,7 +2790,6 @@ struct PlayerView: View {
     .init(label: "Off", seconds: nil, isEndOfStream: false),
     .init(label: "15 minutes", seconds: 15 * 60, isEndOfStream: false),
     .init(label: "30 minutes", seconds: 30 * 60, isEndOfStream: false),
-    .init(label: "45 minutes", seconds: 45 * 60, isEndOfStream: false),
     .init(label: "1 hour", seconds: 60 * 60, isEndOfStream: false),
     .init(label: "1.5 hours", seconds: 90 * 60, isEndOfStream: false),
     .init(label: "End of stream", seconds: nil, isEndOfStream: true),
