@@ -4156,8 +4156,10 @@ private struct RewindScrubBar: View {
     }
     if readout.isAtLiveEdge { return "LIVE" }
     let total = Int(readout.behindLiveSeconds.rounded())
-    let m = total / 60
+    let h = total / 3600
+    let m = (total % 3600) / 60
     let s = total % 60
+    if h > 0 { return String(format: "-%d:%02d:%02d", h, m, s) }
     return String(format: "-%d:%02d", m, s)
   }
 
