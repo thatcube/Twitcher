@@ -99,6 +99,9 @@ struct StreamChannelCard: View {
   var onWatch: ((FollowedChannel) -> Void)? = nil
   /// When provided, a press-and-hold context menu exposes "Go to Channel".
   var onGoToChannel: ((FollowedChannel) -> Void)? = nil
+  /// When provided, a press-and-hold context menu exposes "Not Interested",
+  /// letting the viewer banish a recommendation they don't want to see.
+  var onNotInterested: ((FollowedChannel) -> Void)? = nil
 
   @Environment(\.themePalette) private var palette
   @Environment(\.glassDisabled) private var glassDisabled
@@ -159,7 +162,7 @@ struct StreamChannelCard: View {
       palette: palette
     )
     .shadow(
-      color: Color.black.opacity(layout.usesFocusedShadow && isFocused ? 0.36 : 0),
+      color: Color.black.opacity(layout.usesFocusedShadow && isFocused ? focusedShadowOpacity : 0),
       radius: layout.usesFocusedShadow ? 20 : 0,
       y: layout.usesFocusedShadow ? 10 : 0
     )
@@ -176,7 +179,8 @@ struct StreamChannelCard: View {
     .channelCardContextMenu(
       channel: channel,
       onWatch: onWatch,
-      onGoToChannel: onGoToChannel
+      onGoToChannel: onGoToChannel,
+      onNotInterested: onNotInterested
     )
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilityLabel)
@@ -272,6 +276,13 @@ struct StreamChannelCard: View {
 
   private var usesLiftFocusedText: Bool {
     twizzUsesLiftFocusedText(isFocused: isFocused, glassDisabled: glassDisabled)
+  }
+
+  /// Focused drop-shadow strength. Light mode uses a softer shadow: against a
+  /// light page the dark shadow otherwise muddies into the focused card's
+  /// darkening tint, so the lift reads as a smudge rather than a float.
+  private var focusedShadowOpacity: Double {
+    palette.isLight ? 0.12 : 0.36
   }
 
   @MainActor
@@ -408,9 +419,10 @@ private extension View {
   func channelCardContextMenu(
     channel: FollowedChannel,
     onWatch: ((FollowedChannel) -> Void)?,
-    onGoToChannel: ((FollowedChannel) -> Void)?
+    onGoToChannel: ((FollowedChannel) -> Void)?,
+    onNotInterested: ((FollowedChannel) -> Void)?
   ) -> some View {
-    if onWatch == nil && onGoToChannel == nil {
+    if onWatch == nil && onGoToChannel == nil && onNotInterested == nil {
       self
     } else {
       contextMenu {
@@ -426,6 +438,13 @@ private extension View {
             onGoToChannel(channel)
           } label: {
             Label("Go to Channel", systemImage: "person.crop.circle")
+          }
+        }
+        if let onNotInterested {
+          Button(role: .destructive) {
+            onNotInterested(channel)
+          } label: {
+            Label("Not Interested", systemImage: "hand.thumbsdown")
           }
         }
       }

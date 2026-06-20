@@ -225,6 +225,22 @@ struct ThemePalette: Equatable {
   var chromeGlassHairline: Color {
     isLight ? .black.opacity(0.12) : .white.opacity(0.12)
   }
+
+  // MARK: Focused-card appearance (translucent / glass-enabled path)
+
+  /// Tint blended into a focused content card's Liquid Glass so focus reads as a
+  /// clear lightness shift — not just the scale bump — even before any live
+  /// preview fades in. Dark/OLED brighten toward white; Light darkens toward
+  /// black, so the focused tile always separates from the page behind it. OLED
+  /// uses a lighter wash than Dark because its pure-black background makes the
+  /// same white tint read stronger. This only affects the translucent-glass
+  /// focus treatment; the Reduce Transparency path keeps its opaque
+  /// `liftSurface` fill.
+  var focusedCardGlassTint: Color {
+    if isLight { return Color.black.opacity(0.05) }
+    if self == .oled { return Color.white.opacity(0.10) }
+    return Color.white.opacity(0.13)
+  }
 }
 
 // MARK: - App background
