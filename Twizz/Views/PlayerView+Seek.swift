@@ -95,6 +95,7 @@ extension PlayerView {
     if !isVOD { pinnedToLive = target >= liveCap - 0.5 }
     scrubTargetSeconds = target
     updateRewindReadout()
+    checkVODSeamTransitions(target: target, window: window)
     throttledScrubSeek(to: target)
     scheduleScrubCommit()
     scheduleHide()
@@ -192,6 +193,7 @@ extension PlayerView {
     if !isVOD { pinnedToLive = target >= liveCap - 0.5 }
     scrubTargetSeconds = target
     updateRewindReadout()
+    checkVODSeamTransitions(target: target, window: window)
     throttledScrubSeek(to: target)
   }
 
