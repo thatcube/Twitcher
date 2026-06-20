@@ -156,14 +156,16 @@ struct PlayerView: View {
   /// burst to this interval. A flick lands one button, a long swipe a couple.
   /// Bigger = more deliberate / harder to swipe across. Discrete D-pad clicks are
   /// NOT subject to this (see `controlSwipeBurstGap`).
-  var controlStepInterval: TimeInterval { 0.3 }
+  var controlStepInterval: TimeInterval { 0.26 }
 
   /// Move events closer together than this are treated as one continuous trackpad
   /// swipe (momentum fires `onMoveCommand` in a rapid burst) and are rate-limited
   /// by `controlStepInterval`. Anything slower is a deliberate press — a discrete
   /// D-pad click, or a fresh gesture — and is allowed through immediately so
-  /// pressing left/right repeatedly moves snappily, one button per press.
-  var controlSwipeBurstGap: TimeInterval { 0.12 }
+  /// pressing left/right repeatedly moves snappily, one button per press. Kept low
+  /// so even fast repeated clicking clears it (only true swipe momentum, which
+  /// fires faster, is throttled); raising it also makes swipes move less.
+  var controlSwipeBurstGap: TimeInterval { 0.06 }
 
   /// How long the button we just stepped off stays focusable after a step. With
   /// both the old and new button briefly in the focus engine, tvOS animates the
