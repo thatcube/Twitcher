@@ -14,9 +14,10 @@ import SwiftUI
 /// letterbox bars. That makes the hand-off a seamless sharpen-in-place instead
 /// of the poster filling the frame and then "shrinking" into the video.
 ///
-/// `compact` is for the small multiview tiles: it drops the avatar and the
-/// pulse and uses a smaller spinner/type so the treatment isn't oversized in a
-/// quadrant or filmstrip thumbnail.
+/// There is **one** visual treatment for every surface — the cluster simply
+/// *scales to its container* via the available geometry, so a small multiview
+/// tile gets the same proportions as the full-screen player, just smaller. No
+/// per-surface style fork.
 ///
 /// Theme-aware per the repo conventions: over real stream art the foreground is
 /// white (the scrim keeps it legible, matching over-video chrome), and when
@@ -26,12 +27,15 @@ struct StreamLoadingView: View {
   /// The stream's last frame, shown aspect-fit as the poster. `nil` falls back
   /// to a plain backdrop.
   var posterURL: URL? = nil
-  /// Channel avatar shown above the name. Hidden in `compact` tiles.
+  /// Channel avatar shown beside the name.
   var avatarURL: URL? = nil
   /// Channel display name or content title.
   var title: String? = nil
-  /// Tight layout for multiview tiles: no avatar/pulse, smaller spinner & type.
-  var compact: Bool = false
+  /// Whether to paint the theme's letterbox backdrop behind the poster. The
+  /// full player and clip player letterbox over `playerBackdrop`; multiview
+  /// tiles sit on their own black pane wall, so they pass `false` and let it
+  /// show through. This is a surface-match, not a different style.
+  var drawsBackdrop: Bool = true
 
   @Environment(\.themePalette) private var palette
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -46,22 +50,30 @@ struct StreamLoadingView: View {
   }
 
   var body: some View {
-    ZStack {
-      // Bars match the loaded state's letterbox. The full player letterboxes
-      // over `playerBackdrop`; multiview tiles are always on a black wall (even
-      // in Light theme), so compact lets the pane's own black show through.
-      (compact ? Color.clear : palette.playerBackdrop)
+    GeometryReader { geo in
+      let scale = clusterScale(for: geo.size)
 
-      if let posterURL {
-        CachedAsyncImage(url: posterURL) { image in
-          image.resizable().scaledToFit()
-        } placeholder: {
-          Color.clear
+      ZStack {
+        // Bars match the loaded state's letterbox. The full player letterboxes
+        // over `playerBackdrop`; multiview tiles are on a black wall (even in
+        // Light theme), so they skip the backdrop and let the pane's own black
+        // show through.
+        if drawsBackdrop {
+          palette.playerBackdrop
         }
-        .overlay(Color.black.opacity(0.28))
-      }
 
-      cluster
+        if let posterURL {
+          CachedAsyncImage(url: posterURL) { image in
+            image.resizable().scaledToFit()
+          } placeholder: {
+            Color.clear
+          }
+          .overlay(Color.black.opacity(0.28))
+        }
+
+        cluster(scale: scale)
+      }
+      .frame(width: geo.size.width, height: geo.size.height)
     }
     .clipped()
     .allowsHitTesting(false)
@@ -73,33 +85,43 @@ struct StreamLoadingView: View {
     }
   }
 
-  private var cluster: some View {
-    VStack(spacing: compact ? 12 : 18) {
+  /// One scale factor derived from the container, relative to a full-screen
+  /// tvOS player (1920×1080). A quadrant or filmstrip thumbnail scales the same
+  /// cluster down proportionally rather than switching to a different layout.
+  private func clusterScale(for size: CGSize) -> CGFloat {
+    guard size.width > 0, size.height > 0 else { return 1 }
+    let ratio = min(size.width / 1920, size.height / 1080)
+    return min(max(ratio, 0.5), 1)
+  }
+
+  private func cluster(scale: CGFloat) -> some View {
+    VStack(spacing: 18 * scale) {
       ProgressView()
         .tint(foreground)
-        .scaleEffect(compact ? 1.0 : 1.3)
+        .scaleEffect(1.3 * scale)
 
       // Icon + name sit side by side so the channel reads as one unit.
       if avatarURL != nil || (title.map { !$0.isEmpty } ?? false) {
-        HStack(spacing: compact ? 8 : 12) {
+        HStack(spacing: 12 * scale) {
           if let avatarURL {
-            avatar(avatarURL)
+            avatar(avatarURL, scale: scale)
           }
           if let title, !title.isEmpty {
             Text(title)
-              .font(compact ? .headline : .title3.weight(.semibold))
+              .font(.system(size: 32 * scale, weight: .semibold))
               .foregroundStyle(foreground)
               .lineLimit(1)
+              .minimumScaleFactor(0.6)
               .shadow(color: hasArt ? .black.opacity(0.6) : .clear, radius: 6, y: 1)
           }
         }
       }
     }
-    .padding(compact ? 12 : 24)
+    .padding(24 * scale)
   }
 
-  private func avatar(_ url: URL) -> some View {
-    let size: CGFloat = compact ? 36 : 64
+  private func avatar(_ url: URL, scale: CGFloat) -> some View {
+    let size: CGFloat = 64 * scale
     return CachedAsyncImage(url: url) { image in
       image.resizable().scaledToFill()
     } placeholder: {
