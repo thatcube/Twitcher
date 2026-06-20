@@ -68,6 +68,7 @@ extension PlayerView {
   /// Freeze chat for `softPauseSeconds`, counting down then auto-resuming.
   /// Focus is left untouched — this is a lightweight "let me read" pause.
   func startSoftPause() {
+    chatExitFocusTask?.cancel()
     freezeChatSnapshot()
     softPauseTask?.cancel()
     chatSoftPauseRemaining = softPauseSeconds
@@ -101,6 +102,7 @@ extension PlayerView {
   /// Promote a soft pause into manual scroll mode, anchored at the newest message.
   func beginChatScrolling() {
     guard !isChatScrolling else { return }
+    chatExitFocusTask?.cancel()
     freezeChatSnapshot()
     cancelSoftPause()
     isChatScrolling = true
@@ -324,28 +326,42 @@ extension PlayerView {
   }
 
   /// Leave any frozen state and let chat snap back to the live, newest message.
-  /// When `restoreFocus` is set (the viewer deliberately exited the scroll via
-  /// Back or by scrolling to the bottom) focus is driven to the composer /
-  /// collapse button. The control-row buttons re-enter the focus engine this
-  /// same tick (their `focusRemoved` gate flips with `isChatScrolling`), so tvOS
-  /// re-evaluates and would otherwise bounce focus to the leftmost control (the
-  /// channel button on the far side); a one-tick reassert lands it on the
-  /// composer instead. Callers that move focus elsewhere themselves (VOD
-  /// scroller blur, hiding chat) leave `restoreFocus` false.
+  /// When `restoreFocus` is set (the viewer deliberately exited via Back or by
+  /// scrolling to the bottom) focus is kept on the composer. The control-row
+  /// buttons are gated out of the focus engine while `isChatScrolling` is true
+  /// (their `focusRemoved` modifier); if we flip that false in the SAME render
+  /// that we move focus, tvOS re-inserts the buttons and bounces focus to the
+  /// leftmost control (the channel button) — then any correction we make is a
+  /// visible teleport. Instead we keep the buttons removed, pin focus on the
+  /// composer, and only re-enable the row on the NEXT runloop, by which point
+  /// focus has already settled and the buttons reappear underneath it.
   func resumeChatLive(restoreFocus: Bool = false) {
     cancelSoftPause()
-    isChatScrolling = false
     chatScrollAnchorID = nil
     chatFrozenMessages = nil
     stopTrackpadScrollLoop()
-    scheduleHide()
-    guard restoreFocus else { return }
+
+    guard restoreFocus, !isVOD else {
+      // VOD (or a non-deliberate resume) has no live composer to hold. Flip
+      // immediately; for a deliberate VOD exit place focus on the collapse
+      // button, otherwise let the caller decide.
+      isChatScrolling = false
+      if restoreFocus { focus = chatScrollExitFocus }
+      scheduleHide()
+      return
+    }
+
+    // Render A: still "scrolling" (buttons stay removed), focus pinned on the
+    // composer — which already holds it during the scroll, so this is a no-op
+    // that simply prevents any competitor from grabbing it.
     focus = chatScrollExitFocus
     chatExitFocusTask?.cancel()
     chatExitFocusTask = Task { @MainActor in
-      try? await Task.sleep(for: .milliseconds(30))
-      guard !Task.isCancelled else { return }
+      // Render B (next runloop): re-enable the control row now that focus is
+      // firmly on the composer, so the buttons can't steal it on the way back in.
+      isChatScrolling = false
       focus = chatScrollExitFocus
+      scheduleHide()
     }
   }
 }
