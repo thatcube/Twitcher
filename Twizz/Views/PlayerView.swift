@@ -154,6 +154,24 @@ struct PlayerView: View {
     }
   }
 
+  /// Record a horizontal move within the control row so an immediately following
+  /// `.up` can be recognised as the tail of a diagonal swipe rather than a
+  /// deliberate request for the seek bar.
+  func noteControlHorizontalMove() {
+    lastControlHorizontalMoveAt = Date()
+  }
+
+  /// Handle an up-press from a control button. Moves focus to the seek bar, but
+  /// only when it's available and no horizontal move just happened — a swipe
+  /// between buttons frequently carries a stray vertical component, and acting on
+  /// it would yank focus to the bar accidentally.
+  func requestSeekBarFocus() {
+    guard rewindAvailable else { return }
+    if let last = lastControlHorizontalMoveAt,
+       Date().timeIntervalSince(last) < 0.28 { return }
+    focus = .rewindScrubber
+  }
+
   /// Spoken value for the rewind/seek bar's `accessibilityValue`: VODs read
   /// "elapsed of total", live reads "Live" at the edge or "N behind live".
   var rewindAccessibilityValue: String {
@@ -609,6 +627,12 @@ struct PlayerView: View {
   /// Reasserts focus onto the composer after leaving a chat scroll; see
   /// `resumeChatLive(restoreFocus:)`.
   @State var chatExitFocusTask: Task<Void, Never>?
+  /// Timestamp of the last horizontal move within the control row. A trackpad
+  /// swipe between buttons often carries a slight vertical component, which tvOS
+  /// reports as an `.up` and would otherwise fling focus onto the seek bar. We
+  /// suppress an up→seek-bar jump for a short window after any left/right move so
+  /// the bar is only reached by a deliberate up press, not an accidental diagonal.
+  @State var lastControlHorizontalMoveAt: Date?
   /// A just-activated settings control to briefly defend against tvOS's
   /// transient focus jump when toggling an option resizes the panel.
   @State var chatFocusPin: Focusable?
@@ -1848,11 +1872,13 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .right:
+            noteControlHorizontalMove()
             focus = .quality
           case .left:
+            noteControlHorizontalMove()
             focus = .streamInfo
           case .up:
-            if rewindAvailable { focus = .rewindScrubber }
+            requestSeekBarFocus()
           default:
             break
           }
@@ -1922,11 +1948,13 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
+            noteControlHorizontalMove()
             focus = .streamInfo
           case .right:
+            noteControlHorizontalMove()
             focus = .chatSettingsButton
           case .up:
-            if rewindAvailable { focus = .rewindScrubber }
+            requestSeekBarFocus()
           default:
             break
           }
@@ -1951,11 +1979,13 @@ struct PlayerView: View {
           .onMoveCommand { direction in
             switch direction {
             case .left:
+              noteControlHorizontalMove()
               focus = .streamInfo
             case .right:
+              noteControlHorizontalMove()
               focus = .chatSettingsButton
             case .up:
-              if rewindAvailable { focus = .rewindScrubber }
+              requestSeekBarFocus()
             default:
               break
             }
@@ -1973,11 +2003,13 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
+            noteControlHorizontalMove()
             focus = .quality
           case .right:
+            noteControlHorizontalMove()
             focus = .chatToggle
           case .up:
-            if rewindAvailable { focus = .rewindScrubber }
+            requestSeekBarFocus()
           default:
             break
           }
@@ -1998,13 +2030,14 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
+            noteControlHorizontalMove()
             focus = .chatSettingsButton
           case .right:
             if showChat {
               focus = chatFocusAnchor
             }
           case .up:
-            if rewindAvailable { focus = .rewindScrubber }
+            requestSeekBarFocus()
           default:
             break
           }
