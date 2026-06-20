@@ -146,44 +146,25 @@ struct PlayerView: View {
   }
 
   /// Control-row buttons in left-to-right visual order. Drives the row-membership
-  /// check below; stepping uses explicit neighbours at each call site.
+  /// check below.
   var controlOrder: [Focusable] { [.streamInfo, .quality, .chatSettingsButton, .chatToggle] }
-
-  /// Minimum time between accepted horizontal steps *during a continuous swipe*.
-  /// The row keeps only ONE button in the focus engine at a time (see
-  /// `controlButtonRemoved`), so tvOS can never free-walk across it on a fast
-  /// swipe — every step is driven by `stepControl`, which rate-limits the swipe
-  /// burst to this interval. A flick lands a button or two, a long swipe a few.
-  /// Bigger = more deliberate / harder to swipe across. This throttle applies
-  /// ONLY to touch swipes: physical D-pad clicks bypass it entirely (every press
-  /// moves), detected via the remote's clickpad button (`horizontalClickActive`).
-  var controlStepInterval: TimeInterval { 0.22 }
-
-  /// How long the button we just stepped off stays focusable after a step. With
-  /// both the old and new button briefly in the focus engine, tvOS animates the
-  /// focus halo *sliding* across instead of hard-cutting (the teleport that made
-  /// stepping feel glitchy). Kept just under `controlStepInterval` so it clears
-  /// before the next step is allowed, collapsing back to a single focusable button.
-  var controlSlideDuration: TimeInterval { 0.2 }
 
   func isControlRowButton(_ f: Focusable?) -> Bool {
     guard let f else { return false }
     return controlOrder.contains(f)
   }
 
-  /// Whether `button` is dropped from the focus engine right now. Only the active
-  /// button — plus, for the brief slide window, the one we just stepped off — is
-  /// focusable; everything else is removed so a fast swipe has no sibling to fling
-  /// onto and can't cross the row in one gesture. All buttons drop while chat is
-  /// being scrolled (focus is trapped on chat). Expressed as "removed" so we apply
-  /// `.focusable(false)` (never `.focusable(true)`, which hijacks a Button's Select
-  /// press on tvOS).
+  /// Whether `button` is dropped from the focus engine right now. All four control
+  /// buttons are natively focusable together so tvOS's focus engine moves focus
+  /// between them instantly and reliably on every press (no programmatic stepping,
+  /// no throttle, no dropped or delayed moves). They are removed *only* while chat
+  /// is being scrolled, when focus is trapped on the composer. The row is wrapped
+  /// in a `.focusSection()` so a swipe can roam the buttons but can't escape to the
+  /// chat pane; the seek bar and composer keep their own gates. Expressed as
+  /// "removed" so we apply `.focusable(false)` (never `.focusable(true)`, which
+  /// hijacks a Button's Select press on tvOS).
   func controlButtonRemoved(_ button: Focusable) -> Bool {
-    if isChatScrolling { return true }
-    if button == focus { return false }
-    if button == controlRowActiveButton { return false }
-    if button == controlStepFrom { return false }
-    return true
+    isChatScrolling
   }
 
   /// Whether the chat composer (and its send button) should be dropped from the
@@ -200,65 +181,20 @@ struct PlayerView: View {
     return false
   }
 
-  /// Jump focus straight to `button` as the sole focusable control (no slide
-  /// ghost). Used for reveals and deliberate cross-section jumps (e.g. dropping
-  /// from the seek bar).
+  /// Jump focus straight to `button`. Used for reveals and deliberate cross-section
+  /// jumps (e.g. dropping from the seek bar).
   func activateControl(_ button: Focusable) {
-    controlStepClearTask?.cancel()
-    controlStepFrom = nil
-    controlRowActiveButton = button
     focus = button
   }
 
-  /// The shared rate limiter for every horizontal move. A physical D-pad click is
-  /// detected at the hardware level (the clickpad depresses over a left/right zone,
-  /// which a touch swipe never does) and is ALWAYS honoured — press left/right
-  /// seven times and focus moves seven times, however fast you press. Only a touch
-  /// swipe, which fires `onMoveCommand` in a rapid burst with no clickpad press, is
-  /// rate-limited to one accepted step per `controlStepInterval`, so a swipe can't
-  /// fling across the row in a single gesture.
-  func controlStepAllowed() -> Bool {
-    let now = Date()
-    if trackpad.horizontalClickActive {
-      lastControlStepAt = now
-      return true
-    }
-    if let last = lastControlStepAt, now.timeIntervalSince(last) < controlStepInterval {
-      return false
-    }
-    lastControlStepAt = now
-    return true
-  }
-
-  /// Hold `source` focusable for the slide window so tvOS animates the focus halo
-  /// across, then collapse back to a single focusable button.
-  func scheduleControlSlide(from source: Focusable) {
-    controlStepFrom = source
-    controlStepClearTask?.cancel()
-    controlStepClearTask = Task { @MainActor in
-      try? await Task.sleep(for: .seconds(controlSlideDuration))
-      if Task.isCancelled { return }
-      controlStepFrom = nil
-    }
-  }
-
-  /// Take one rate-limited horizontal step from `source` to `target`. `source` is
-  /// held focusable for `controlSlideDuration` so tvOS animates the halo sliding.
-  func stepControl(to target: Focusable, from source: Focusable) {
-    guard controlStepAllowed() else { return }
-    controlRowActiveButton = target
-    focus = target
-    scheduleControlSlide(from: source)
-  }
-
-  /// The deliberate hop from the collapse button into the chat input, rate-limited
-  /// exactly like a normal control step (so a swipe can't sail past collapse into
-  /// chat) and arming the composer into the focus engine for this move.
+  /// The deliberate hop from the collapse button into the chat input. The composer
+  /// is otherwise kept out of the focus engine while focus sits on a control button
+  /// (see `chatInputFocusBlocked`), so a swipe roaming the control row can't sail
+  /// into chat; only this explicit right-press arms it and moves focus there.
   func stepToChatInput(from source: Focusable) {
-    guard showChat, controlStepAllowed() else { return }
+    guard showChat else { return }
     chatInputArmed = true
     focus = chatFocusAnchor
-    scheduleControlSlide(from: source)
   }
 
   /// Handle an up-press from a control button: reveal the seek bar. Setting
@@ -725,20 +661,6 @@ struct PlayerView: View {
   /// Reasserts focus onto the composer after leaving a chat scroll; see
   /// `resumeChatLive(restoreFocus:)`.
   @State var chatExitFocusTask: Task<Void, Never>?
-  /// The single control-row button that is currently allowed in the focus engine.
-  /// Keeping exactly one button focusable (see `controlButtonRemoved`) is what
-  /// prevents a fast trackpad swipe from flinging focus across the whole row —
-  /// the engine has nowhere to walk, so every step is driven (and rate-limited)
-  /// by `stepControl`. Kept in sync with `focus` in the body's onChange.
-  @State var controlRowActiveButton: Focusable = .quality
-  /// The button focus just stepped off, kept transiently focusable so tvOS can
-  /// animate the focus halo sliding onto the new button (see `stepControl`).
-  @State var controlStepFrom: Focusable?
-  /// Clears `controlStepFrom` after the slide window so the row collapses back to
-  /// a single focusable button.
-  @State var controlStepClearTask: Task<Void, Never>?
-  /// Timestamp of the last accepted control-row step, for the swipe rate limit.
-  @State var lastControlStepAt: Date?
   /// Set for the duration of a deliberate, throttled hop from the collapse button
   /// into the chat input, which momentarily admits the composer to the focus
   /// engine. Cleared as soon as focus returns to a control button so a plain swipe
@@ -1424,11 +1346,9 @@ struct PlayerView: View {
         switch direction {
         case .up:
           pendingControlFocus = .quality
-          controlRowActiveButton = .quality
           revealControls(preferredFocus: .quality)
         case .left:
           pendingControlFocus = .streamInfo
-          controlRowActiveButton = .streamInfo
           revealControls(preferredFocus: .streamInfo)
         case .right:
           if !showChat {
@@ -1439,13 +1359,11 @@ struct PlayerView: View {
           // the row's default at the collapse button so a later move into the
           // row from chat is sensible.
           pendingControlFocus = .chatToggle
-          controlRowActiveButton = .chatToggle
           revealControls(preferredFocus: chatFocusAnchor)
         case .down where showChat && (isChatScrolling || chatSoftPauseRemaining != nil):
           handleChatDownPress()
         default:
           pendingControlFocus = .quality
-          controlRowActiveButton = .quality
           revealControls(preferredFocus: .quality)
         }
       } else {
@@ -1453,12 +1371,6 @@ struct PlayerView: View {
       }
     }
     .onChange(of: focus) { oldFocus, newFocus in
-      // Keep the single focusable control button in sync with wherever focus
-      // actually lands (reveals, menu dismissals, hide-chat, etc.), so the
-      // focusability gate always matches reality.
-      if isControlRowButton(newFocus), let newFocus, controlRowActiveButton != newFocus {
-        controlRowActiveButton = newFocus
-      }
       // Disarm the chat-input hop the moment focus is back on a control button, so
       // the composer drops out of the engine again and a plain swipe can't reach it.
       if isControlRowButton(newFocus), chatInputArmed {
@@ -2009,14 +1921,7 @@ struct PlayerView: View {
         .focusRemoved(controlButtonRemoved(.streamInfo))
         .focused($focus, equals: .streamInfo)
         .onMoveCommand { direction in
-          switch direction {
-          case .right:
-            stepControl(to: .quality, from: .streamInfo)
-          case .up:
-            requestSeekBarFocus()
-          default:
-            break
-          }
+          if direction == .up { requestSeekBarFocus() }
         }
 
       Spacer(minLength: 18)
@@ -2081,16 +1986,7 @@ struct PlayerView: View {
         .focusRemoved(controlButtonRemoved(.quality))
         .focused($focus, equals: .quality)
         .onMoveCommand { direction in
-          switch direction {
-          case .left:
-            stepControl(to: .streamInfo, from: .quality)
-          case .right:
-            stepControl(to: .chatSettingsButton, from: .quality)
-          case .up:
-            requestSeekBarFocus()
-          default:
-            break
-          }
+          if direction == .up { requestSeekBarFocus() }
         }
         }
 
@@ -2110,16 +2006,7 @@ struct PlayerView: View {
           .focusRemoved(controlButtonRemoved(.quality))
           .focused($focus, equals: .quality)
           .onMoveCommand { direction in
-            switch direction {
-            case .left:
-              stepControl(to: .streamInfo, from: .quality)
-            case .right:
-              stepControl(to: .chatSettingsButton, from: .quality)
-            case .up:
-              requestSeekBarFocus()
-            default:
-              break
-            }
+            if direction == .up { requestSeekBarFocus() }
           }
         }
 
@@ -2132,16 +2019,7 @@ struct PlayerView: View {
         .focusRemoved(controlButtonRemoved(.chatSettingsButton))
         .focused($focus, equals: .chatSettingsButton)
         .onMoveCommand { direction in
-          switch direction {
-          case .left:
-            stepControl(to: .quality, from: .chatSettingsButton)
-          case .right:
-            stepControl(to: .chatToggle, from: .chatSettingsButton)
-          case .up:
-            requestSeekBarFocus()
-          default:
-            break
-          }
+          if direction == .up { requestSeekBarFocus() }
         }
 
         Button {
@@ -2158,8 +2036,6 @@ struct PlayerView: View {
         .focused($focus, equals: .chatToggle)
         .onMoveCommand { direction in
           switch direction {
-          case .left:
-            stepControl(to: .chatSettingsButton, from: .chatToggle)
           case .right:
             stepToChatInput(from: .chatToggle)
           case .up:
@@ -4707,33 +4583,12 @@ final class RemoteTrackpadMonitor {
   /// directional press from a mere finger rest.
   private(set) var dpadUpPressed = false
   private(set) var dpadDownPressed = false
-  private(set) var dpadLeftPressed = false
-  private(set) var dpadRightPressed = false
   /// Direction (+1 up / -1 down / 0 none) captured at the instant of a click,
   /// while the finger position is still trustworthy. The live dpad/`y` reading
   /// flickers once the surface is clicked, so a held repeat keys off this latch
   /// plus `clickPressed` rather than the live position.
   private(set) var clickLatchedDirection = 0
-  /// Timestamp of the most recent *horizontal* physical click (the clickpad
-  /// depressed while the finger sits over the left/right zone). A touch swipe
-  /// drags the analog dpad but never depresses the pad, so it never sets this —
-  /// which is exactly how the control row tells a deliberate left/right press
-  /// (always honoured) apart from swipe momentum (rate-limited).
-  private(set) var lastHorizontalClickAt: Date?
   private var observers: [NSObjectProtocol] = []
-
-  /// True while a left/right press should be treated as a deliberate click: the
-  /// pad is currently held down over a horizontal zone (covers press-and-hold
-  /// auto-repeat), or a horizontal click landed within the last 150 ms (covers
-  /// rapid discrete clicking, where each press registers just before its
-  /// focus-move event). A pure touch swipe satisfies neither.
-  var horizontalClickActive: Bool {
-    if clickPressed, dpadLeftPressed || dpadRightPressed || abs(horizontalValue) > 0.2 {
-      return true
-    }
-    if let t = lastHorizontalClickAt, Date().timeIntervalSince(t) < 0.15 { return true }
-    return false
-  }
 
   func start() {
     for controller in GCController.controllers() { configure(controller) }
@@ -4753,8 +4608,6 @@ final class RemoteTrackpadMonitor {
         self?.clickPressed = false
         self?.dpadUpPressed = false
         self?.dpadDownPressed = false
-        self?.dpadLeftPressed = false
-        self?.dpadRightPressed = false
         self?.clickLatchedDirection = 0
       })
   }
@@ -4767,8 +4620,6 @@ final class RemoteTrackpadMonitor {
     clickPressed = false
     dpadUpPressed = false
     dpadDownPressed = false
-    dpadLeftPressed = false
-    dpadRightPressed = false
     clickLatchedDirection = 0
   }
 
@@ -4797,11 +4648,6 @@ final class RemoteTrackpadMonitor {
         } else {
           self.clickLatchedDirection = 0
         }
-        // A press over a left/right zone is a deliberate horizontal click; stamp
-        // it so the control row honours it even amid swipe-throttling.
-        if self.dpadLeftPressed || self.dpadRightPressed || abs(self.horizontalValue) > 0.2 {
-          self.lastHorizontalClickAt = Date()
-        }
       } else {
         self.clickLatchedDirection = 0
       }
@@ -4811,12 +4657,6 @@ final class RemoteTrackpadMonitor {
     }
     micro.dpad.down.pressedChangedHandler = { [weak self] _, _, pressed in
       self?.dpadDownPressed = pressed
-    }
-    micro.dpad.left.pressedChangedHandler = { [weak self] _, _, pressed in
-      self?.dpadLeftPressed = pressed
-    }
-    micro.dpad.right.pressedChangedHandler = { [weak self] _, _, pressed in
-      self?.dpadRightPressed = pressed
     }
   }
 }
