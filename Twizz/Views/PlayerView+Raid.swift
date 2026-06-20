@@ -69,20 +69,29 @@ extension PlayerView {
   /// raid to bring a meaningful slice of their current audience.
   func shouldShowIncomingRaid(_ raid: RaidEvent) -> Bool {
     // Channels at or below this many concurrent viewers are "small" enough that
-    // every raid is meaningful and always shown.
+    // every raid is meaningful, so always show it.
     let smallChannelCeiling = 100
-    // On larger channels the bar scales with the size of the stream you're
-    // watching: a raid must bring at least this fraction of the current audience
-    // to be worth surfacing (e.g. 10% — so a 500-viewer stream needs ~50
-    // incoming, a 10k stream needs ~1k, a 250k stream needs ~25k).
-    let meaningfulFraction = 0.10
 
     // Unknown audience size (count not resolved yet): show it rather than risk
     // silently dropping a real raid.
     guard let watching = hermes.viewerCount, watching > smallChannelCeiling else {
       return true
     }
-    return Double(raid.viewerCount) >= Double(watching) * meaningfulFraction
+
+    // Above that the bar scales with the size of the stream you're watching, but
+    // *sublinearly*: a flat percentage explodes on huge channels (10% of 150k is
+    // 15k incoming, which is absurd). Model it as a power law instead, anchored
+    // so a 1,000-viewer stream needs ~40 incoming, with the required share
+    // shrinking as the channel grows:
+    //   threshold = anchorRaid * (viewers / anchorViewers) ^ falloff
+    // e.g. ~26 @ 500, ~105 @ 5k, ~160 @ 10k, ~420 @ 50k, ~800 @ 150k, ~1.1k @ 250k.
+    // Tune `anchorRaid` to raise/lower the whole curve; raise `falloff` toward
+    // 1.0 to make big channels demand proportionally bigger raids.
+    let anchorViewers = 1_000.0
+    let anchorRaid = 40.0
+    let falloff = 0.6
+    let threshold = anchorRaid * pow(Double(watching) / anchorViewers, falloff)
+    return Double(raid.viewerCount) >= threshold
   }
 
   func followRaid(_ login: String) {
