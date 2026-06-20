@@ -37,9 +37,6 @@ struct MultiviewPlayerView: View {
   /// A brief on-appear coach hint explaining the hidden controls.
   @State private var hintVisible = true
   @State private var hintHideTask: Task<Void, Never>?
-  /// Timestamp of the last unconsumed up-press, used to require a deliberate
-  /// double-up to reveal the HUD so ordinary navigation doesn't trigger it.
-  @State private var lastUpAt: Date?
 
   init(
     channels: [FollowedChannel],
@@ -101,21 +98,12 @@ struct MultiviewPlayerView: View {
       }
     }
     .onMoveCommand { direction in
-      switch direction {
-      case .up where !showingControls:
-        // Require two up-presses in quick succession so simply navigating to
-        // the top row doesn't pop the HUD by accident.
-        let now = Date()
-        if let last = lastUpAt, now.timeIntervalSince(last) < 0.7 {
-          lastUpAt = nil
-          revealControls()
-        } else {
-          lastUpAt = now
-        }
-      case .down where showingControls:
+      // Swipe up while the HUD is open pushes it back away. (Reveal is bound to
+      // Play/Pause instead of a direction: in a 2×2 grid every swipe direction
+      // is already used to move between panes, so there's no reliably-free
+      // directional gesture to open the controls with.)
+      if direction == .up, showingControls {
         hideControls()
-      default:
-        lastUpAt = nil
       }
     }
     .onAppear {
@@ -138,9 +126,13 @@ struct MultiviewPlayerView: View {
       bumpChrome()
     }
     .onPlayPauseCommand {
-      controller.toggleLayout()
-      bumpChrome()
-      showHintBriefly()
+      // Play/Pause toggles the controls HUD — a single, discoverable,
+      // non-directional button that never fires while navigating the grid.
+      if showingControls {
+        hideControls()
+      } else {
+        revealControls()
+      }
     }
     .onDisappear {
       chromeHideTask?.cancel()
@@ -169,8 +161,8 @@ struct MultiviewPlayerView: View {
   /// controls are discoverable. Styled as a standard tvOS material pill.
   private var revealHint: some View {
     HStack(spacing: 10) {
-      Icon(glyph: .selector, size: 18)
-      Text("Press Up twice for controls")
+      Icon(glyph: .playerPlayFilled, size: 18)
+      Text("Press Play/Pause for controls")
         .font(.callout.weight(.medium))
     }
     .foregroundStyle(.white)
@@ -212,6 +204,18 @@ struct MultiviewPlayerView: View {
         }
         .focused($focus, equals: .addButton)
       }
+
+      Button {
+        hideControls()
+      } label: {
+        Label {
+          Text("Close")
+        } icon: {
+          Icon(glyph: .x, size: 22)
+        }
+        .font(.headline)
+      }
+      .focused($focus, equals: .closeButton)
     }
     .padding(.horizontal, 28)
     .padding(.vertical, 14)
@@ -414,6 +418,7 @@ private enum MultiviewFocusTarget: Hashable {
   case pane(String)
   case layoutButton
   case addButton
+  case closeButton
 }
 
 /// A single video tile with focus highlight, status overlays, an auto-hiding

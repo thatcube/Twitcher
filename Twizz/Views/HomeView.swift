@@ -114,6 +114,7 @@ struct HomeView: View {
 
   enum SidebarTab: String, CaseIterable, Identifiable {
     case home = "Home"
+    case multiview = "Multiview"
     case browse = "Browse"
     case search = "Search"
     case settings = "Settings"
@@ -123,6 +124,7 @@ struct HomeView: View {
     var glyph: Glyph {
       switch self {
       case .home: return .home
+      case .multiview: return .borderAll
       case .browse: return .layoutGrid
       case .search: return .search
       case .settings: return .settings
@@ -166,6 +168,17 @@ struct HomeView: View {
         .tabItem {
           Label(SidebarTab.home.rawValue, image: SidebarTab.home.tablerImageName)
         }
+
+      // Multiview is a cover-trigger tab: selecting it presents the existing,
+      // well-tested multiview full-screen cover over a blank backdrop, and
+      // dismissing it drops back to Home (handled in onChange/onDismiss).
+      tabContainer {
+        Color.clear
+      }
+      .tag(SidebarTab.multiview)
+      .tabItem {
+        Label(SidebarTab.multiview.rawValue, image: SidebarTab.multiview.tablerImageName)
+      }
 
       tabContainer {
         BrowseView(
@@ -275,6 +288,13 @@ struct HomeView: View {
       }
     }
     .onChange(of: selectedSidebarTab) { _, tab in
+      if tab == .multiview {
+        // Present the multiview cover; it lives over a blank tab so closing it
+        // returns the viewer to Home rather than a placeholder screen.
+        multiviewInitialChannels = nil
+        showingMultiview = true
+        return
+      }
       guard tab == .home else { return }
       Task {
         async let followedDone: Void = refreshFollowedChannelsIfNeeded(force: false)
@@ -329,6 +349,9 @@ struct HomeView: View {
       if let channel = pendingMultiviewWatch {
         pendingMultiviewWatch = nil
         selectedChannel = channel
+      } else if selectedSidebarTab == .multiview {
+        // Closing multiview from its own tab returns to Home.
+        selectedSidebarTab = .home
       }
     }) {
       MultiviewRootView(
@@ -405,21 +428,6 @@ struct HomeView: View {
         Spacer()
 
         HStack(spacing: 8) {
-          if multiviewAvailablePool.count >= 2 {
-            Button {
-              multiviewInitialChannels = nil
-              showingMultiview = true
-            } label: {
-              Label {
-                Text("Multiview")
-                  .font(.system(size: 24, weight: .semibold))
-              } icon: {
-                Icon(glyph: .borderAll, size: 26)
-              }
-            }
-            .accessibilityLabel("Watch multiple channels at once")
-          }
-
           if !follows.isUsingDemoData {
             Button {
               showingFollowingDirectory = true

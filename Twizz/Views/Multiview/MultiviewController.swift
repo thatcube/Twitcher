@@ -34,6 +34,10 @@ final class MultiviewPane: Identifiable {
   var hasError = false
   /// Whether this pane currently owns audio (mirrors the focused pane).
   var isAudible = false
+  /// Whether this pane is currently loaded at full (source/auto) quality rather
+  /// than the lightweight preview rendition. The spotlight primary uses full
+  /// quality; small grid/filmstrip panes stay on the preview tier.
+  @ObservationIgnored var isHighQuality = false
 
   @ObservationIgnored fileprivate var resolveTask: Task<Void, Never>?
 
@@ -80,18 +84,25 @@ final class MultiviewController {
 
   /// Resolve and begin playback for every pane.
   func start() {
+    syncQualityTiers()
     for pane in panes { load(pane) }
   }
 
-  /// (Re)resolve a single pane's stream URL and start it muted.
+  /// (Re)resolve a single pane's stream URL and start it muted. High-quality
+  /// panes (the spotlight primary) pull the full source/auto playlist with no
+  /// bitrate cap; everything else uses the lightweight preview rendition so a
+  /// 2×2 wall stays smooth.
   func load(_ pane: MultiviewPane) {
     pane.isLoading = true
     pane.hasError = false
     pane.resolveTask?.cancel()
+    let highQuality = pane.isHighQuality
     pane.resolveTask = Task { [weak pane] in
       guard let pane else { return }
       do {
-        let url = try await PlaybackService.previewHLSURL(for: pane.channel.login)
+        let url = highQuality
+          ? try await PlaybackService.hlsURL(for: pane.channel.login)
+          : try await PlaybackService.previewHLSURL(for: pane.channel.login)
         guard !Task.isCancelled else { return }
         let asset = AVURLAsset(
           url: url,
@@ -99,7 +110,8 @@ final class MultiviewController {
         )
         let item = AVPlayerItem(asset: asset)
         item.preferredForwardBufferDuration = 1.0
-        item.preferredPeakBitRate = 2_200_000
+        // 0 = unlimited: let AVPlayer adapt up to the source for the spotlight.
+        item.preferredPeakBitRate = highQuality ? 0 : 2_200_000
         pane.player.replaceCurrentItem(with: item)
         pane.player.isMuted = !pane.isAudible
         pane.player.play()
@@ -158,6 +170,7 @@ final class MultiviewController {
   func makePrimary(_ paneID: String) {
     guard panes.contains(where: { $0.id == paneID }) else { return }
     primaryPaneID = paneID
+    refreshQuality()
   }
 
   /// Flip between the grid and spotlight arrangements.
@@ -165,6 +178,30 @@ final class MultiviewController {
     layout = (layout == .grid) ? .spotlight : .grid
     if layout == .spotlight, primaryPane == nil {
       primaryPaneID = panes.first?.id
+    }
+    refreshQuality()
+  }
+
+  /// Which panes should currently run at full quality: only the spotlight
+  /// primary. In grid mode every pane stays on the lightweight preview tier.
+  private func shouldBeHighQuality(_ pane: MultiviewPane) -> Bool {
+    layout == .spotlight && pane.id == primaryPane?.id
+  }
+
+  /// Recompute each pane's desired quality tier without reloading anything.
+  private func syncQualityTiers() {
+    for pane in panes { pane.isHighQuality = shouldBeHighQuality(pane) }
+  }
+
+  /// Re-evaluate quality tiers and reload only the panes whose tier changed, so
+  /// switching layout or primary pane upgrades/downgrades just those streams.
+  private func refreshQuality() {
+    for pane in panes {
+      let desired = shouldBeHighQuality(pane)
+      if desired != pane.isHighQuality {
+        pane.isHighQuality = desired
+        load(pane)
+      }
     }
   }
 
