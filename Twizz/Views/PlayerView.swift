@@ -159,18 +159,23 @@ struct PlayerView: View {
   /// into one step per gesture makes navigating the row feel deliberate and
   /// precise (you land on the next button instead of flinging across the whole
   /// row) — closer to how YouTube and the system transport controls behave.
-  var controlSwipeThrottle: TimeInterval { 0.55 }
+  var controlSwipeThrottle: TimeInterval { 0.85 }
 
   /// Step focus to a neighbouring control button, but at most once per swipe
-  /// gesture. A move that arrives inside the throttle window is swallowed (and it
-  /// refreshes the timestamp so a continuous swipe keeps yielding nothing until
-  /// the finger lifts), so a fast flick advances a single button rather than
-  /// rocketing past several. Deliberate, spaced presses pass straight through.
-  func navigateControl(to target: Focusable) {
+  /// gesture. The catch on tvOS is that the focus engine ALSO moves focus between
+  /// the buttons on its own; simply declining to set `focus` here does nothing to
+  /// stop that native move, which is why a throttle that just `return`s is barely
+  /// noticeable. So when a move lands inside the throttle window we actively
+  /// reassert focus back onto the button we came from (`source`), cancelling the
+  /// engine's move — a continuous swipe keeps refreshing the timestamp and gets
+  /// pinned in place until the finger lifts. Deliberate, spaced presses (outside
+  /// the window) pass straight through and advance exactly one button.
+  func navigateControl(from source: Focusable, to target: Focusable) {
     let now = Date()
     if let last = lastControlHorizontalMoveAt,
        now.timeIntervalSince(last) < controlSwipeThrottle {
       lastControlHorizontalMoveAt = now
+      focus = source
       return
     }
     lastControlHorizontalMoveAt = now
@@ -1888,7 +1893,7 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .right:
-            navigateControl(to: .quality)
+            navigateControl(from: .streamInfo, to: .quality)
           case .up:
             requestSeekBarFocus()
           default:
@@ -1960,9 +1965,9 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            navigateControl(to: .streamInfo)
+            navigateControl(from: .quality, to: .streamInfo)
           case .right:
-            navigateControl(to: .chatSettingsButton)
+            navigateControl(from: .quality, to: .chatSettingsButton)
           case .up:
             requestSeekBarFocus()
           default:
@@ -1989,9 +1994,9 @@ struct PlayerView: View {
           .onMoveCommand { direction in
             switch direction {
             case .left:
-              navigateControl(to: .streamInfo)
+              navigateControl(from: .quality, to: .streamInfo)
             case .right:
-              navigateControl(to: .chatSettingsButton)
+              navigateControl(from: .quality, to: .chatSettingsButton)
             case .up:
               requestSeekBarFocus()
             default:
@@ -2011,9 +2016,9 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            navigateControl(to: .quality)
+            navigateControl(from: .chatSettingsButton, to: .quality)
           case .right:
-            navigateControl(to: .chatToggle)
+            navigateControl(from: .chatSettingsButton, to: .chatToggle)
           case .up:
             requestSeekBarFocus()
           default:
@@ -2036,10 +2041,10 @@ struct PlayerView: View {
         .onMoveCommand { direction in
           switch direction {
           case .left:
-            navigateControl(to: .chatSettingsButton)
+            navigateControl(from: .chatToggle, to: .chatSettingsButton)
           case .right:
             if showChat {
-              navigateControl(to: chatFocusAnchor)
+              navigateControl(from: .chatToggle, to: chatFocusAnchor)
             }
           case .up:
             requestSeekBarFocus()
