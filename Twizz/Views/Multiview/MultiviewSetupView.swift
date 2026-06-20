@@ -25,6 +25,7 @@ struct MultiviewSetupView: View {
   var onCancel: () -> Void
 
   @Environment(\.themePalette) private var palette
+  @Environment(\.glassDisabled) private var glassDisabled
   /// Selected channel ids, in pick order — that order drives grid placement.
   @State private var selectedIDs: [String] = []
   @FocusState private var focusedID: String?
@@ -166,10 +167,14 @@ struct MultiviewSetupView: View {
       showsGameName: true
     )
     .overlay(alignment: .topTrailing) {
-      if let order {
-        selectionBadge(order: order + 1)
-          .padding(20)
+      Group {
+        if let order {
+          selectionBadge(order: order + 1)
+        } else {
+          selectionPlaceholder
+        }
       }
+      .padding(20)
     }
     .overlay {
       RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -214,6 +219,27 @@ struct MultiviewSetupView: View {
       .frame(width: 52, height: 52)
       .background(selectionColor, in: Circle())
       .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
+  }
+
+  /// Unselected (addable) indicator: an empty circle that exactly matches the
+  /// numbered badge's size and position, so every selectable stream advertises
+  /// the same tap target. A liquid-glass disc with a hairline ring in the
+  /// selection color; falls back to a translucent palette fill when Reduce
+  /// Transparency is on so it stays legible without the blur.
+  private var selectionPlaceholder: some View {
+    Circle()
+      .fill(placeholderFill)
+      .overlay {
+        Circle().strokeBorder(selectionColor.opacity(0.9), lineWidth: 3)
+      }
+      .frame(width: 52, height: 52)
+      .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+  }
+
+  private var placeholderFill: AnyShapeStyle {
+    glassDisabled
+      ? AnyShapeStyle(palette.chromeOpaqueSurface)
+      : AnyShapeStyle(.ultraThinMaterial)
   }
 
   private func toggle(_ channel: FollowedChannel) {
