@@ -4,25 +4,33 @@ import SwiftUI
 /// the full player, multiview tiles, and the clip player.
 ///
 /// Instead of a bare spinner on a black screen, it shows the stream's own
-/// thumbnail blurred and dimmed behind a centered native cluster (channel
-/// avatar, name, and the system `ProgressView`). The blurred art doubles as a
-/// poster that fills the frame immediately, so opening a stream reads as a quick
-/// sharpen into live video rather than a black "Loading…" gap.
+/// thumbnail as a poster with a centered native cluster (channel avatar, name,
+/// and the system `ProgressView`) on top.
+///
+/// The poster is **aspect-fit** (`scaledToFit`) so it lands in the *exact* same
+/// letterboxed rectangle the video will once it starts — both the live video
+/// (`VideoSurface`/`PreviewVideoSurface`) use `.resizeAspect`. The surrounding
+/// bars use the theme's player backdrop, identical to the loaded state's
+/// letterbox bars. That makes the hand-off a seamless sharpen-in-place instead
+/// of the poster filling the frame and then "shrinking" into the video.
+///
+/// `compact` is for the small multiview tiles: it drops the avatar and the
+/// pulse and uses a smaller spinner/type so the treatment isn't oversized in a
+/// quadrant or filmstrip thumbnail.
 ///
 /// Theme-aware per the repo conventions: over real stream art the foreground is
-/// white (the dark scrim guarantees legibility, matching over-video chrome), and
-/// when there's no art it falls back to the active `ThemePalette` so the Light
-/// theme stays legible instead of assuming a dark background.
+/// white (the scrim keeps it legible, matching over-video chrome), and when
+/// there's no art it falls back to the active `ThemePalette` so the Light theme
+/// stays legible instead of assuming a dark background.
 struct StreamLoadingView: View {
-  /// The stream's last frame, shown blurred as the backdrop. `nil` falls back to
-  /// the theme's player backdrop.
+  /// The stream's last frame, shown aspect-fit as the poster. `nil` falls back
+  /// to a plain backdrop.
   var posterURL: URL? = nil
   /// Channel avatar shown above the name. Hidden in `compact` tiles.
   var avatarURL: URL? = nil
-  /// Channel display name or content title. Hidden in `compact` tiles when nil.
+  /// Channel display name or content title.
   var title: String? = nil
-  /// Tight layout for multiview filmstrip tiles: smaller blur, no avatar, smaller
-  /// spinner and type.
+  /// Tight layout for multiview tiles: no avatar/pulse, smaller spinner & type.
   var compact: Bool = false
 
   @Environment(\.themePalette) private var palette
@@ -39,32 +47,29 @@ struct StreamLoadingView: View {
 
   var body: some View {
     ZStack {
-      backdrop
+      // Bars match the loaded state's letterbox. The full player letterboxes
+      // over `playerBackdrop`; multiview tiles are always on a black wall (even
+      // in Light theme), so compact lets the pane's own black show through.
+      (compact ? Color.clear : palette.playerBackdrop)
+
+      if let posterURL {
+        CachedAsyncImage(url: posterURL) { image in
+          image.resizable().scaledToFit()
+        } placeholder: {
+          Color.clear
+        }
+        .overlay(Color.black.opacity(0.28))
+      }
+
       cluster
     }
+    .clipped()
     .allowsHitTesting(false)
     .onAppear {
       guard !reduceMotion, !compact, avatarURL != nil else { return }
       withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
         pulse = true
       }
-    }
-  }
-
-  @ViewBuilder
-  private var backdrop: some View {
-    if let posterURL {
-      CachedAsyncImage(url: posterURL) { image in
-        image.resizable().scaledToFill()
-      } placeholder: {
-        palette.playerBackdrop
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .blur(radius: compact ? 0 : 36, opaque: true)
-      .overlay(Color.black.opacity(compact ? 0.28 : 0.42))
-      .clipped()
-    } else {
-      palette.playerBackdrop
     }
   }
 
@@ -81,10 +86,9 @@ struct StreamLoadingView: View {
           .font(compact ? .headline : .title3.weight(.semibold))
           .foregroundStyle(compact ? foreground.opacity(0.85) : foreground)
           .lineLimit(1)
-          .shadow(color: hasArt ? .black.opacity(0.5) : .clear, radius: 6, y: 1)
+          .shadow(color: hasArt ? .black.opacity(0.6) : .clear, radius: 6, y: 1)
       }
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .padding(compact ? 12 : 24)
   }
 
