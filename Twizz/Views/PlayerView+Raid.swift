@@ -71,10 +71,11 @@ extension PlayerView {
     // Channels at or below this many concurrent viewers are "small" enough that
     // every raid is meaningful and always shown.
     let smallChannelCeiling = 100
-    // On larger channels, a raid must bring at least this fraction of the
-    // current audience to clear the bar (e.g. 5% — so a 500-viewer stream needs
-    // ~25 incoming, a 250k stream needs ~12.5k).
-    let meaningfulFraction = 0.05
+    // On larger channels the bar scales with the size of the stream you're
+    // watching: a raid must bring at least this fraction of the current audience
+    // to be worth surfacing (e.g. 10% — so a 500-viewer stream needs ~50
+    // incoming, a 10k stream needs ~1k, a 250k stream needs ~25k).
+    let meaningfulFraction = 0.10
 
     // Unknown audience size (count not resolved yet): show it rather than risk
     // silently dropping a real raid.
@@ -126,15 +127,15 @@ extension PlayerView {
       Spacer()
       HStack(spacing: 20) {
         Icon(glyph: .userPlus, size: 34)
-          .foregroundStyle(.white)
+          .foregroundStyle(.primary)
           .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 4) {
           Text("Raiding to \(raid.toDisplayName)")
             .font(.headline).bold()
-            .foregroundStyle(.white)
+            .foregroundStyle(.primary)
           Text("Auto-following in \(outgoingRaidSecondsRemaining)s · Cancel to stay here")
             .font(.subheadline)
-            .foregroundStyle(.white.opacity(0.85))
+            .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
         Button("Cancel") {
@@ -145,7 +146,20 @@ extension PlayerView {
       }
       .padding(.horizontal, 36)
       .padding(.vertical, 20)
-      .background(Color(red: 0.40, green: 0.25, blue: 0.78).opacity(0.95), in: Capsule())
+      .background {
+        // Neutral, theme-aware surface (matches the incoming raid + go-live
+        // banners) instead of the old fixed purple, so it stays legible in
+        // every theme.
+        if glassDisabled {
+          Capsule().fill(palette.chromeOpaqueSurface)
+            .overlay(Capsule().strokeBorder(palette.chromeOpaqueBorder, lineWidth: 1))
+        } else if #available(tvOS 26.0, *) {
+          Capsule().glassEffect(.regular, in: Capsule())
+        } else {
+          Capsule().fill(.ultraThinMaterial)
+        }
+      }
+      .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
       .padding(.bottom, 60)
     }
     .ignoresSafeArea()
