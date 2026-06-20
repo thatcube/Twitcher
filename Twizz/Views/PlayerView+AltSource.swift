@@ -80,4 +80,48 @@ extension PlayerView {
     startRateController()
     startPlaybackWatchdog()
   }
+
+  /// Polls the alternate-source item each monitor tick and reports its *real*
+  /// state into `altSourceStatus`, so a black screen tells us why: a failed load
+  /// (HTTP error / expired googlevideo URL), a stall (segments not arriving), or
+  /// genuine playback. Diagnostic-only; runs while the alt source is active.
+  func updateAltSourceDiagnostics() {
+    guard isUsingAltSource else { return }
+    guard let item = player.currentItem else {
+      altSourceStatus = "YouTube: no player item"
+      return
+    }
+
+    switch item.status {
+    case .failed:
+      let msg = item.error?.localizedDescription ?? "unknown error"
+      var detail = "YouTube failed: \(msg)"
+      if let last = item.errorLog()?.events.last {
+        let code = last.errorStatusCode
+        let comment = last.errorComment ?? ""
+        detail += " [\(code)\(comment.isEmpty ? "" : " \(comment)")]"
+      }
+      altSourceStatus = detail
+    case .unknown:
+      altSourceStatus = "YouTube: loading manifest…"
+    case .readyToPlay:
+      let ahead = bufferAheadSeconds(item).map { String(format: "%.1fs", $0) } ?? "—"
+      let playing = player.timeControlStatus == .playing
+      let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+      let size = item.presentationSize
+      let hasVideo = size.width > 0 && size.height > 0
+      if playing, hasVideo {
+        altSourceStatus = "Playing YouTube simulcast · buffer \(ahead)"
+      } else if playing, !hasVideo {
+        altSourceStatus = "YouTube: audio-only? no video track (buffer \(ahead))"
+      } else if waiting {
+        let why = item.isPlaybackBufferEmpty ? "buffer empty — segments not arriving" : "buffering"
+        altSourceStatus = "YouTube waiting: \(why) (buffer \(ahead))"
+      } else {
+        altSourceStatus = "YouTube ready, paused (buffer \(ahead))"
+      }
+    @unknown default:
+      altSourceStatus = "YouTube: unknown status"
+    }
+  }
 }
