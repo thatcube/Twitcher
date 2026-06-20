@@ -576,9 +576,8 @@ private struct SettingPill: View {
 
       if showsMenuIndicator {
         Icon(glyph: .selector, size: 40)
-      } else {
+      } else if isSelected {
         Icon(glyph: .check, size: 26)
-          .opacity(isSelected ? 1 : 0)
       }
     }
   }
