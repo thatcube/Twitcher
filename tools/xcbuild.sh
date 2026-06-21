@@ -28,7 +28,7 @@
 # -----
 #   ./tools/xcbuild.sh <any xcodebuild args>
 #
-#   e.g. ./tools/xcbuild.sh -project Twizz.xcodeproj -scheme Twizz \
+#   e.g. ./tools/xcbuild.sh -project Twozz.xcodeproj -scheme Twozz \
 #          -destination "platform=tvOS,id=$DEVICE_ID" build
 #
 set -euo pipefail
