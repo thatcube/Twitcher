@@ -171,6 +171,24 @@ final class PlayerModel {
   var diagIsFrozen = false
   var diagFrozenSince: Date?
   var diagSessionStartedAt: Date?
+
+  // MARK: Raid banners (incoming/outgoing)
+  var raidBannerDismissTask: Task<Void, Never>?
+  var incomingRaidAvatarURL: URL?
+  var outgoingRaid: OutgoingRaidEvent?
+  var outgoingRaidSecondsRemaining = 0
+  var outgoingRaidFollowTask: Task<Void, Never>?
+
+  // MARK: Sleep timer
+  // A single countdown task pauses playback after a chosen duration so the
+  // Apple TV can sleep when the viewer dozes off.
+  var sleepTimerTask: Task<Void, Never>?
+  var sleepDeadline: Date?
+  var sleepUntilStreamEnds = false
+  var sleepRemainingSeconds: Int?
+  var sleepSelectionIndex = 0
+  var showStillWatching = false
+  var isSleeping = false
 }
 
 extension PlayerView {
@@ -345,5 +363,53 @@ extension PlayerView {
   var diagSessionStartedAt: Date? {
     get { model.diagSessionStartedAt }
     nonmutating set { model.diagSessionStartedAt = newValue }
+  }
+  var raidBannerDismissTask: Task<Void, Never>? {
+    get { model.raidBannerDismissTask }
+    nonmutating set { model.raidBannerDismissTask = newValue }
+  }
+  var incomingRaidAvatarURL: URL? {
+    get { model.incomingRaidAvatarURL }
+    nonmutating set { model.incomingRaidAvatarURL = newValue }
+  }
+  var outgoingRaid: OutgoingRaidEvent? {
+    get { model.outgoingRaid }
+    nonmutating set { model.outgoingRaid = newValue }
+  }
+  var outgoingRaidSecondsRemaining: Int {
+    get { model.outgoingRaidSecondsRemaining }
+    nonmutating set { model.outgoingRaidSecondsRemaining = newValue }
+  }
+  var outgoingRaidFollowTask: Task<Void, Never>? {
+    get { model.outgoingRaidFollowTask }
+    nonmutating set { model.outgoingRaidFollowTask = newValue }
+  }
+  var sleepTimerTask: Task<Void, Never>? {
+    get { model.sleepTimerTask }
+    nonmutating set { model.sleepTimerTask = newValue }
+  }
+  var sleepDeadline: Date? {
+    get { model.sleepDeadline }
+    nonmutating set { model.sleepDeadline = newValue }
+  }
+  var sleepUntilStreamEnds: Bool {
+    get { model.sleepUntilStreamEnds }
+    nonmutating set { model.sleepUntilStreamEnds = newValue }
+  }
+  var sleepRemainingSeconds: Int? {
+    get { model.sleepRemainingSeconds }
+    nonmutating set { model.sleepRemainingSeconds = newValue }
+  }
+  var sleepSelectionIndex: Int {
+    get { model.sleepSelectionIndex }
+    nonmutating set { model.sleepSelectionIndex = newValue }
+  }
+  var showStillWatching: Bool {
+    get { model.showStillWatching }
+    nonmutating set { model.showStillWatching = newValue }
+  }
+  var isSleeping: Bool {
+    get { model.isSleeping }
+    nonmutating set { model.isSleeping = newValue }
   }
 }

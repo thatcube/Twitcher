@@ -663,33 +663,13 @@ struct PlayerView: View {
   /// transient focus jump when toggling an option resizes the panel.
   @State var chatFocusPin: Focusable?
   @State var chatFocusPinTask: Task<Void, Never>?
-  @State var raidBannerDismissTask: Task<Void, Never>?
-  /// Resolved avatar of the channel currently raiding us, shown in the incoming
-  /// raid banner (mirrors the go-live toast). Best-effort; nil while it loads.
-  @State var incomingRaidAvatarURL: URL?
-  /// The outgoing raid currently being followed (with a cancel window).
-  @State var outgoingRaid: OutgoingRaidEvent?
-  @State var outgoingRaidSecondsRemaining = 0
-  @State var outgoingRaidFollowTask: Task<Void, Never>?
+  // Raid banner state (incoming/outgoing) now lives in PlayerModel.
 
   // MARK: Sleep timer (hidden inside the Quality menu)
   // A single countdown task pauses playback after a chosen duration so the
   // Apple TV can sleep when the viewer dozes off. It lives inside the Quality
   // menu (no dedicated button) and surfaces a small top-right countdown badge.
-  @State var sleepTimerTask: Task<Void, Never>?
-  /// Wall-clock instant playback should pause at, for the timed durations.
-  @State var sleepDeadline: Date?
-  /// "End of stream" mode: sleep when the channel goes offline, not on a clock.
-  @State var sleepUntilStreamEnds = false
-  /// Seconds left before sleep, republished each second for the countdown badge.
-  @State var sleepRemainingSeconds: Int?
-  /// Index of the chosen option, so the submenu shows a checkmark.
-  @State var sleepSelectionIndex = 0
-  /// Shown ~30s before a timed sleep so an awake viewer can keep watching.
-  @State var showStillWatching = false
-  /// True once the timer fires: playback is paused under a dim "Sleeping"
-  /// overlay until the viewer presses to resume.
-  @State var isSleeping = false
+  // Sleep-timer state now lives in PlayerModel.
 
   // MARK: Stream Rewind → VOD hand-off tuning
 
