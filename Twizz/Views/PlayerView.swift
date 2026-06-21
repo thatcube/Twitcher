@@ -629,6 +629,9 @@ struct PlayerView: View {
     // Stream Rewind transport bar
     case rewindScrubber
     // Main settings page
+    // ⚠️ Every chat-settings (`chat*` / *Merge*) case below must also be listed
+    // in `isChatSettingsFocus(_:)` (PlayerView+BottomOverlay.swift), or focus
+    // will bounce off the control. See that function's doc comment.
     case chatPresetOption(Int)
     case chatAdvancedButton
     case chatWidthOption(Int)
@@ -1183,6 +1186,20 @@ struct PlayerView: View {
         if isChatSettingsFocus(newFocus) {
           lastChatSettingsFocus = newFocus
         } else {
+          // Focus landed on something the chat-settings registry doesn't know,
+          // so bounce back to the last good control. If you just added a control
+          // to the settings panel and it won't hold focus, the cause is almost
+          // certainly a missing case in `isChatSettingsFocus(_:)` — this is the
+          // recurring trap. Surface it loudly in debug builds.
+          #if DEBUG
+          if showChatSettings, newFocus != .video {
+            print(
+              "⚠️ [chat-settings focus] '\(newFocus)' is not registered in "
+                + "isChatSettingsFocus(_:), so focus is bouncing off it. Add this "
+                + "case to that switch in PlayerView+BottomOverlay.swift."
+            )
+          }
+          #endif
           focus = lastChatSettingsFocus
         }
         return
