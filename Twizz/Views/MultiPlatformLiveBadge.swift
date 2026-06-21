@@ -19,12 +19,14 @@ struct MultiPlatformLiveBadge: View {
   var body: some View {
     if let youtube = channel.youtube, youtube.isLive {
       VStack(alignment: .leading, spacing: prominent ? 8 : 6) {
-        PlatformLiveRow(
-          glyph: .brandTwitch,
-          tint: SocialPlatform.twitch.tint,
-          viewerCount: channel.viewerCount,
-          prominent: prominent
-        )
+        if channel.isLive {
+          PlatformLiveRow(
+            glyph: .brandTwitch,
+            tint: SocialPlatform.twitch.tint,
+            viewerCount: channel.viewerCount,
+            prominent: prominent
+          )
+        }
         PlatformLiveRow(
           glyph: .brandYoutube,
           tint: SocialPlatform.youtube.tint,
