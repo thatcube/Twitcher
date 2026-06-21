@@ -171,14 +171,26 @@ final class ChatService {
   var kickViewerCount: Int?
   var kickSeenMessageIDs: Set<String> = []
   var kickSeenMessageOrder: [String] = []
-  /// Rolling cap on retained chat lines. The live list backs a `LazyVStack`
-  /// whose `ForEach` is diffed on every append, and both `visibleChatMessages`
-  /// and the gesture scroll loop scan/copy this array (the loop does so up to
-  /// 60×/sec while swiping). All of that scales with the count, so on a busy or
-  /// raided channel a large buffer is a steady scroll-cost tax. 500 keeps a
-  /// generous scrollback window (~3× Twitch web's ~150) while staying light on
-  /// the Apple TV's modest CPU.
-  let maxBufferedMessages = 500
+  /// Rolling cap on retained chat lines, adaptive to inbound rate. The live list
+  /// backs a `LazyVStack`, and when the viewer scrolls back we materialise its
+  /// rows and re-resolve the `scrollTo` offset every frame — work that scales
+  /// with how many rows the buffer holds. The catch is that a row's *value* in
+  /// scrollback collapses exactly when traffic is highest: at 350–400k viewers,
+  /// 500 lines is only a few seconds of unreadable flood, so the deep buffer
+  /// buys almost no real history while taxing every scroll frame. So we keep a
+  /// generous window on calm channels (where lines are readable and scrollback
+  /// is genuinely useful) and shrink it as the smoothed rate climbs, trading
+  /// seconds-old flood nobody reads for smoother scrolling. The trim runs each
+  /// flush, so on a busy stream the buffer is already small when the viewer
+  /// freezes it to scroll — directly cutting the rows they page through.
+  var maxBufferedMessages: Int {
+    switch smoothedMessageRate {
+    case ..<15: return 500
+    case ..<30: return 400
+    case ..<45: return 280
+    default: return 200
+    }
+  }
 
   /// Background ingest stage: parses raw frames into `ChatMessage`s and computes
   /// their `segments` off the main actor, then hands finished batches back to the
@@ -199,10 +211,21 @@ final class ChatService {
   /// Wall-clock of the last flush, used to flush instantly when the previous
   /// flush is already older than one tick (i.e. traffic is low).
   var lastAppendFlushAt: Date = .distantPast
-  /// One display tick. Appends arriving within this window of the last flush are
-  /// coalesced into a single mutation; an isolated append older than this flushes
-  /// with zero added latency.
-  let appendCoalesceInterval: Double = 1.0 / 60.0
+  /// Adaptive coalescing window. At low traffic we flush at display rate so a
+  /// lone line appears instantly and chat feels snappy. As the smoothed inbound
+  /// rate climbs, we stretch the window so a burst folds into one `ForEach` diff
+  /// + one `LazyVStack` layout pass instead of many — the dominant render cost on
+  /// raided/huge (e.g. 350k-viewer) channels. 60 visual updates a second aren't
+  /// humanly readable, so this trades imperceptible freshness for a 3–5× drop in
+  /// render churn. The window only widens; it never adds latency at low traffic.
+  var adaptiveCoalesceInterval: Double {
+    switch smoothedMessageRate {
+    case ..<15: return 1.0 / 60.0
+    case ..<30: return 1.0 / 30.0
+    case ..<45: return 1.0 / 20.0
+    default: return 1.0 / 12.0
+    }
+  }
   /// Smoothed inbound message rate (msg/s), updated on each flush and used to
   /// decide whether to shed under extreme load.
   var smoothedMessageRate: Double = 0
@@ -213,7 +236,7 @@ final class ChatService {
   let extremeMessageRateThreshold: Double = 45
   /// Hard cap on how many messages a single coalesced flush will append while
   /// shedding is active. Anything beyond this in one tick is dropped from the
-  /// front of the burst — those oldest lines would be trimmed off the 500 cap
+  /// front of the burst — those oldest lines would be trimmed off the buffer cap
   /// within ~1s of a raid anyway.
   let maxMessagesPerFlushUnderLoad = 24
 
