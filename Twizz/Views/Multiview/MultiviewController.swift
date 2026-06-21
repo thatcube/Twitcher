@@ -96,6 +96,21 @@ final class MultiviewPane: Identifiable {
     player.automaticallyWaitsToMinimizeStalling = true
     self.player = player
   }
+
+  /// Safety net only — ``MultiviewController/removePane(_:)`` and
+  /// ``MultiviewController/teardown()`` are the primary cleanup and already
+  /// cancel resolution and null the player item. If a pane is ever released
+  /// without going through them, cancel any in-flight URL resolution and tear
+  /// the player down on the main actor so a late resolve / lingering item can't
+  /// keep a dead pane's decoder alive.
+  deinit {
+    resolveTask?.cancel()
+    let player = player
+    Task { @MainActor in
+      player.pause()
+      player.replaceCurrentItem(with: nil)
+    }
+  }
 }
 
 /// Owns the set of panes for one multiview session and the single "audible"

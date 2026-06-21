@@ -83,9 +83,33 @@ actor LiveCaptionEngine {
     /// into the player from this actor.
     private var latestPlayhead: Date?
 
+    /// Tracks whether the playhead is actually advancing, so ingest can pause
+    /// while the user is paused (or playback is stalled) and resume on play.
+    /// `lastPlayheadAdvanceAt` is bumped only when the forwarded playhead value
+    /// changes; a clock that present-but-frozen for longer than
+    /// `ingestPauseThreshold` means "not moving".
+    private var lastPlayheadValue: Date?
+    private var lastPlayheadAdvanceAt = Date()
+    private let ingestPauseThreshold: TimeInterval = 0.75
+
+    /// True when a playhead clock exists but hasn't advanced recently — i.e. the
+    /// user paused or playback stalled. While true we stop fetching/decoding
+    /// audio: the playhead isn't moving so `drainPending` would release nothing
+    /// anyway, and resuming re-fetches from the live playlist — functionally
+    /// identical captions while saving on-device decode/recognition CPU. When no
+    /// playhead clock is available we never pause (preserves prior behavior).
+    private var isIngestPaused: Bool {
+        guard latestPlayhead != nil else { return false }
+        return Date().timeIntervalSince(lastPlayheadAdvanceAt) > ingestPauseThreshold
+    }
+
     /// Update the playhead used to gate caption playout. Called periodically from
     /// the MainActor controller.
     func setPlayhead(_ date: Date?) {
+        if let date, date != lastPlayheadValue {
+            lastPlayheadValue = date
+            lastPlayheadAdvanceAt = Date()
+        }
         latestPlayhead = date
     }
 
@@ -212,6 +236,16 @@ actor LiveCaptionEngine {
     private func runPollLoop() async {
         var nextPollAt = Date()
         while !Task.isCancelled {
+            // While the user is paused (or playback is stalled) the playhead
+            // isn't advancing, so skip the whole fetch/demux/decode/recognize
+            // ingest path entirely — it would only buffer audio the (frozen)
+            // playhead never reaches. Resume re-polls immediately once the
+            // playhead moves again.
+            if isIngestPaused {
+                nextPollAt = Date()
+                try? await Task.sleep(for: .seconds(0.25))
+                continue
+            }
             if Date() >= nextPollAt {
                 let pace: Double
                 do {
