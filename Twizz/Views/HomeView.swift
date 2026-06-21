@@ -23,6 +23,7 @@ struct HomeView: View {
   @State private var youtubeLive = YouTubeLiveSnapshotService()
   @State private var youtubeAuth = YouTubeAuthSession()
   @State private var youtubeSubscriptions = YouTubeSubscriptionsService()
+  @State private var youtubeResolver = YouTubeLiveResolver()
   @State private var themeManager = ThemeManager()
   @State private var selectedChannel: FollowedChannel?
   @State private var channelPageTarget: ChannelPageTarget?
@@ -38,6 +39,8 @@ struct HomeView: View {
   @State private var firstFocusRequested = false
   @State private var showSignIn = false
   @State private var showYouTubeSignIn = false
+  @State private var youtubePlayback: YouTubePlaybackTarget?
+  @AppStorage(YouTubePreferences.showSubscriptionsKey) private var showYouTubeSubscriptions = true
   @State private var refreshToast: RefreshToastState?
   @State private var goLive = GoLiveWatcher()
   @State private var goLiveSettings = GoLiveNotificationSettings()
@@ -280,6 +283,7 @@ struct HomeView: View {
       requestFocusIfPossible(force: true)
       openDeepLinkedChannelIfNeeded(deepLinkRouter.pendingChannelLogin)
       await youtubeSubscriptions.refresh(using: youtubeAuth)
+      await refreshYouTubeSubscriptionLiveness()
     }
     .onChange(of: follows.channels) { _, _ in
       requestFocusIfPossible(force: false)
@@ -301,7 +305,10 @@ struct HomeView: View {
       }
     }
     .onChange(of: youtubeAuth.isAuthenticated) { _, _ in
-      Task { await youtubeSubscriptions.refresh(using: youtubeAuth, force: true) }
+      Task {
+        await youtubeSubscriptions.refresh(using: youtubeAuth, force: true)
+        await refreshYouTubeSubscriptionLiveness(force: true)
+      }
     }
     .onChange(of: selectedSidebarTab) { _, tab in
       guard tab == .home else { return }
@@ -368,10 +375,18 @@ struct HomeView: View {
     }
     .fullScreenCover(isPresented: $showYouTubeSignIn) {
       YouTubeSignInView(auth: youtubeAuth) {
-        Task { await youtubeSubscriptions.refresh(using: youtubeAuth, force: true) }
+        Task {
+          await youtubeSubscriptions.refresh(using: youtubeAuth, force: true)
+          await refreshYouTubeSubscriptionLiveness(force: true)
+        }
       }
       .environment(\.themePalette, resolvedPalette)
       .preferredColorScheme(themeManager.theme.preferredColorScheme)
+    }
+    .fullScreenCover(item: $youtubePlayback) { target in
+      YouTubeLivePlayerView(videoID: target.videoID, title: target.title)
+        .environment(\.themePalette, resolvedPalette)
+        .preferredColorScheme(themeManager.theme.preferredColorScheme)
     }
   }
 
@@ -395,6 +410,7 @@ struct HomeView: View {
       ScrollView(.vertical, showsIndicators: false) {
         VStack(alignment: .leading, spacing: 72) {
           followingSection(rail: rail)
+          youtubeSubscriptionsSection(rail: rail)
           recommendedForYouSection(rail: rail)
           topStreamsSection(rail: rail)
           recommendedCategoriesSection(rail: rail)
@@ -494,6 +510,125 @@ struct HomeView: View {
       }
     }
     .focusSection()
+  }
+
+  // MARK: - YouTube subscriptions
+
+  /// YouTube channel IDs already represented by a Twitch-followed card (either
+  /// already enriched with YouTube presence, or known via the alias table), so
+  /// the YouTube row doesn't duplicate a streamer who's also on the Following rail.
+  private var twitchRepresentedYouTubeChannelIDs: Set<String> {
+    var ids = Set(follows.channels.compactMap { $0.youtube?.channelID })
+    for channel in follows.channels {
+      if let mapped = youtubeAliases.youtubeChannelID(forTwitchLogin: channel.login) {
+        ids.insert(mapped)
+      }
+    }
+    return ids
+  }
+
+  /// Subscribed YouTube streamers who are live right now, as unified cards, with
+  /// any streamer already shown on the Following (Twitch) rail removed.
+  private var liveYouTubeSubscriptionCards: [FollowedChannel] {
+    let represented = twitchRepresentedYouTubeChannelIDs
+    return youtubeSubscriptions.subscriptions.compactMap { sub in
+      guard let presence = youtubeResolver.presence(forChannelID: sub.channelID),
+        presence.isLive,
+        !represented.contains(sub.channelID)
+      else { return nil }
+
+      let thumbnailURL = presence.videoID.flatMap {
+        URL(string: "https://i.ytimg.com/vi/\($0)/hqdefault.jpg")
+      }
+      var channel = FollowedChannel(
+        id: "yt-\(sub.channelID)",
+        login: sub.channelID,
+        displayName: sub.title,
+        title: presence.title ?? "",
+        gameName: "",
+        viewerCount: nil,
+        thumbnailURL: thumbnailURL,
+        profileImageURL: sub.thumbnailURL,
+        isLive: false
+      )
+      channel.youtube = presence
+      return channel
+    }
+  }
+
+  private func refreshYouTubeSubscriptionLiveness(force: Bool = false) async {
+    guard youtubeAuth.isAuthenticated, showYouTubeSubscriptions else { return }
+    let ids = youtubeSubscriptions.subscriptions.map(\.channelID)
+    await youtubeResolver.refresh(channelIDs: ids, using: youtubeAuth, force: force)
+  }
+
+  @ViewBuilder
+  private func youtubeSubscriptionsSection(rail: ChannelRailMetrics) -> some View {
+    let cards = showYouTubeSubscriptions ? liveYouTubeSubscriptionCards : []
+
+    if !cards.isEmpty {
+      VStack(alignment: .leading, spacing: 2) {
+        HStack {
+          Text("Live on YouTube")
+            .font(.system(size: 32, weight: .bold))
+            .accessibilityAddTraits(.isHeader)
+
+          if youtubeResolver.isResolving {
+            ProgressView()
+              .scaleEffect(0.85)
+          }
+
+          Spacer()
+        }
+
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: rail.spacing) {
+            ForEach(cards) { channel in
+              let itemID = "youtube-\(channel.id)"
+              let isFocused = focusedItemID == itemID
+
+              StreamChannelCard(
+                channel: channel,
+                isFocused: isFocused,
+                layout: .rail(
+                  mediaWidth: rail.mediaWidth,
+                  mediaHeight: rail.mediaHeight,
+                  focusHorizontalInset: focusHorizontalInset,
+                  focusVerticalInset: focusVerticalInset,
+                  cardCornerRadius: cardCornerRadius,
+                  mediaCornerRadius: mediaCornerRadius
+                ),
+                showsGameName: false,
+                onWatch: { playYouTube($0) },
+                onGoToChannel: { playYouTube($0) }
+              )
+              .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
+              .focusable(true)
+              .focused($focusedItemID, equals: itemID)
+              .focusEffectDisabled()
+              .onTapGesture {
+                playYouTube(channel)
+              }
+              .accessibilityAddTraits(.isButton)
+              .scaleEffect(isFocused ? AppLayout.focusedCardScale : 1)
+              .animation(AppLayout.focusScaleAnimation, value: isFocused)
+              .zIndex(isFocused ? 2 : 0)
+            }
+          }
+          .padding(.vertical, channelRailVerticalPadding)
+        }
+        .scrollClipDisabled()
+      }
+      .focusSection()
+    }
+  }
+
+  private func playYouTube(_ channel: FollowedChannel) {
+    guard let videoID = channel.youtube?.videoID else { return }
+    watchHistory.record(channel)
+    youtubePlayback = YouTubePlaybackTarget(
+      videoID: videoID,
+      title: channel.displayName)
   }
 
   @ViewBuilder
@@ -904,6 +1039,14 @@ struct HomeView: View {
 struct MultiviewLaunch: Identifiable {
   let id = UUID()
   let channels: [FollowedChannel]
+}
+
+/// A YouTube-only live stream the viewer chose to play (no Twitch equivalent),
+/// identified by its live video ID.
+struct YouTubePlaybackTarget: Identifiable {
+  let id = UUID()
+  let videoID: String
+  let title: String?
 }
 
 enum RefreshToastState {
