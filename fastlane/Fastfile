@@ -1,4 +1,4 @@
-# Fastfile — App Store Connect automation for Twizz (tvOS)
+# Fastfile — App Store Connect automation for Twozz (tvOS)
 #
 # Authentication uses an App Store Connect API key (no Apple ID / 2FA needed),
 # which is required for unattended runs and CI. Provide these via env vars
@@ -16,9 +16,9 @@
 
 require "shellwords"
 
-APP_IDENTIFIER = "com.thatcube.Twizz"
-SCHEME         = "Twizz"
-XCODEPROJ      = "Twizz.xcodeproj"
+APP_IDENTIFIER = "com.thatcube.Twozz"
+SCHEME         = "Twozz"
+XCODEPROJ      = "Twozz.xcodeproj"
 OUTPUT_DIR     = "build"
 # tvOS apps are a distinct App Store "platform"; deliver/pilot default to iOS
 # unless told otherwise, so every upload must specify this explicitly.

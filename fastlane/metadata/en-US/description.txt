@@ -1,4 +1,4 @@
-Twizz is a fast, native Apple TV player for Twitch — free and open source.
+Twozz is a fast, native Apple TV player for Twitch — free and open source.
 
 • Native tvOS experience built for the big screen
 • Live Twitch chat with 7TV, BTTV, and FFZ emote support
@@ -7,4 +7,4 @@ Twizz is a fast, native Apple TV player for Twitch — free and open source.
 • Deep chat appearance customization
 • Dark, Light, and OLED themes
 
-Twizz is open source and not affiliated with, endorsed by, or sponsored by Twitch or Amazon. All trademarks are the property of their respective owners.
+Twozz is open source and not affiliated with, endorsed by, or sponsored by Twitch or Amazon. All trademarks are the property of their respective owners.

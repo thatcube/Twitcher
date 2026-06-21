@@ -95,9 +95,9 @@ func randomID(_ length: Int = 22) -> String {
 func subscribeFrame(topic: String) -> String {
   let message: [String: Any] = [
     "type": "subscribe",
-    "id": "twizz-parent-\(randomID())",
+    "id": "twozz-parent-\(randomID())",
     "subscribe": [
-      "id": "twizz-\(randomID())",
+      "id": "twozz-\(randomID())",
       "type": "pubsub",
       "pubsub": ["topic": topic],
     ],
@@ -110,7 +110,7 @@ func subscribeFrame(topic: String) -> String {
 func authenticateFrame(token: String) -> String {
   let message: [String: Any] = [
     "type": "authenticate",
-    "id": "twizz-auth-\(randomID())",
+    "id": "twozz-auth-\(randomID())",
     "authenticate": ["token": token],
     "timestamp": isoTimestamp(),
   ]
@@ -224,7 +224,7 @@ final class HermesRunner: @unchecked Sendable {
 // MARK: - Run
 
 func run(channel: String, seconds: Double) async {
-  print("=== Twizz spike — Hermes live events POC ===")
+  print("=== Twozz spike — Hermes live events POC ===")
   print("Channel: \(channel)   Listen: \(Int(seconds))s\n")
 
   let id: String

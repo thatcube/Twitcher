@@ -69,7 +69,7 @@ build subprocess. If a raw `xcodebuild` fails with that error, use the wrapper.
 
 ## Versioning
 
-Twizz uses the standard two-number Apple scheme, both driven automatically — do
+Twozz uses the standard two-number Apple scheme, both driven automatically — do
 not hand-edit version numbers:
 
 - **Marketing version** (`CFBundleShortVersionString`) is `MARKETING_VERSION` in
@@ -127,7 +127,7 @@ Rules whenever you add or change any UI element:
 2. **Use the shared theme-aware helpers instead.** For player chat-settings
    surfaces use `chatSettingsForeground` (and the matching background/stroke
    helpers in `PlayerView+Settings.swift`); elsewhere resolve colors from the
-   active `ThemePalette` (`Twizz/Shared/Theme.swift`) and the `glassDisabled`
+   active `ThemePalette` (`Twozz/Shared/Theme.swift`) and the `glassDisabled`
    (Reduce Transparency) environment value. If a suitable shared helper doesn't
    exist for your surface, **add one** rather than inlining a literal color.
 3. **Respect Reduce Transparency.** When `glassDisabled` is true, panels become
@@ -168,7 +168,7 @@ other icon sets unless explicitly asked to for a specific case.
 
 How it works in this repo:
 
-1. Icons are rendered via the `Icon`/`Glyph` API in `Twizz/Views/Icon.swift`.
+1. Icons are rendered via the `Icon`/`Glyph` API in `Twozz/Views/Icon.swift`.
 2. Glyphs are vendored as template SVGs in `Assets.xcassets/Tabler` as
    `tb-<name>` imagesets. Only icons actually used in the UI are bundled, to keep
    the asset catalog small.

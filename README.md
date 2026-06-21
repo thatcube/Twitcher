@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="Branding/twizz_logo.svg" alt="Twizz logo" width="128" />
+  <img src="Branding/twozz_logo.svg" alt="Twozz logo" width="128" />
 </p>
 
-<h1 align="center">Twizz</h1>
+<h1 align="center">Twozz</h1>
 
 <p align="center">
   A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
@@ -88,8 +88,8 @@ Build:
 
 ```bash
 xcodebuild \
-	-project Twizz.xcodeproj \
-	-scheme Twizz \
+	-project Twozz.xcodeproj \
+	-scheme Twozz \
 	-configuration Debug \
 	-destination 'generic/platform=tvOS Simulator' \
 	build | xcbeautify
@@ -133,7 +133,7 @@ On Apple TV, sign-in uses Twitch Device Code flow: start sign-in on TV, then com
 
 ## Versioning & Releases
 
-Twizz follows the standard Apple two-number scheme, and both numbers update
+Twozz follows the standard Apple two-number scheme, and both numbers update
 automatically — you should not normally edit version numbers by hand:
 
 - **Marketing version** — `CFBundleShortVersionString`, a semver like `0.2.0`,
@@ -164,17 +164,17 @@ lanes: `fastlane build` (archive only, no upload), `fastlane release`,
 
 ## How Playback Works
 
-Apple TV has no official Twitch playback SDK. Twizz resolves playback via Twitch GraphQL PlaybackAccessToken and Usher HLS playlists, similar in spirit to open-source clients like Streamlink and Frosty.
+Apple TV has no official Twitch playback SDK. Twozz resolves playback via Twitch GraphQL PlaybackAccessToken and Usher HLS playlists, similar in spirit to open-source clients like Streamlink and Frosty.
 
 This project is non-commercial and ad-respecting.
 
 ## Not Supported: Auto-Redeeming Channel Points
 
-Twizz won't auto-claim channel points (the way the 7TV/FFZ browser extensions do). Twitch's official login that Twizz uses isn't accepted by the private API that claims points — that API only trusts a real twitch.tv web-session login. Supporting it would mean adding a second login where you type your Twitch password into the app and storing a full-account session token, plus fighting Twitch's anti-bot checks. It's also against Twitch's Terms of Service. Not worth the security risk and fragility, so we're not doing it.
+Twozz won't auto-claim channel points (the way the 7TV/FFZ browser extensions do). Twitch's official login that Twozz uses isn't accepted by the private API that claims points — that API only trusts a real twitch.tv web-session login. Supporting it would mean adding a second login where you type your Twitch password into the app and storing a full-account session token, plus fighting Twitch's anti-bot checks. It's also against Twitch's Terms of Service. Not worth the security risk and fragility, so we're not doing it.
 
 ## Not Supported: Follow / Unfollow Actions
 
-Twizz can show who you follow, but Twitch now blocks follow/unfollow mutations from this app context with integrity checks. Because of that Twitch-side restriction, Twizz does not expose follow/unfollow controls — use the official Twitch app or website to change follows.
+Twozz can show who you follow, but Twitch now blocks follow/unfollow mutations from this app context with integrity checks. Because of that Twitch-side restriction, Twozz does not expose follow/unfollow controls — use the official Twitch app or website to change follows.
 
 ## Ideas & Improvements
 
@@ -185,13 +185,13 @@ A running list of things we're considering but haven't built yet:
 - **Moderator mode** — timeout / ban / delete and a mod-action log from the couch for users who mod.
 - **Chat keyword highlights + mention ping** — client-side highlighting for keywords and your username in busy chats.
 - **Freeze-chat-on-focus** — pause autoscroll while you're reading so it doesn't fight you.
-- **Siri & deep search** — "Play _channel_ on Twizz" and system-Search results that jump straight into playback.
+- **Siri & deep search** — "Play _channel_ on Twozz" and system-Search results that jump straight into playback.
 - **Per-channel memory** — remember preferred quality, chat width, and audio-only state per channel.
 - **Deeper accessibility** — VoiceOver labels for chat lines and cards, and a captions toggle where available.
 
 ## Donate
 
-Twizz is free and open source, and it always will be. There's no paywall, no ads, and no obligation to give anything.
+Twozz is free and open source, and it always will be. There's no paywall, no ads, and no obligation to give anything.
 
 If the app has been useful to you and you'd like to chip in toward its upkeep — things like the Apple Developer Program fee and time spent maintaining it — donations are welcome and genuinely appreciated. Anything is plenty, and not donating is completely fine too.
 
