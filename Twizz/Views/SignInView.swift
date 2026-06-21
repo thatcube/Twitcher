@@ -1,8 +1,6 @@
-import CoreImage.CIFilterBuiltins
 import SDWebImage
 import SDWebImageSwiftUI
 import SwiftUI
-import UIKit
 
 /// Full-screen account / sign-in page presented from the top-right profile button.
 /// When signed out it offers two side-by-side options separated by an "OR" divider:
@@ -142,22 +140,7 @@ struct SignInView: View {
   @ViewBuilder
   private var qrCodeView: some View {
     let payload = auth.verificationURIComplete ?? auth.verificationURI ?? "https://www.twitch.tv/activate"
-
-    Group {
-      if let image = Self.makeQRCode(from: payload) {
-        Image(uiImage: image)
-          .interpolation(.none)
-          .resizable()
-          .scaledToFit()
-      } else {
-        RoundedRectangle(cornerRadius: 16)
-          .fill(Color.white.opacity(0.1))
-          .overlay(ProgressView())
-      }
-    }
-    .frame(width: 500, height: 500)
-    .padding(32)
-    .background(Color.white, in: RoundedRectangle(cornerRadius: 36))
+    BrandQRCodeView(payload: payload, logoName: "twitch-logo")
   }
 
   @ViewBuilder
@@ -236,21 +219,6 @@ struct SignInView: View {
       }
       Button("Cancel", role: .cancel) {}
     }
-  }
-
-  // MARK: - QR generation
-
-  private static let ciContext = CIContext()
-
-  private static func makeQRCode(from string: String) -> UIImage? {
-    let filter = CIFilter.qrCodeGenerator()
-    filter.message = Data(string.utf8)
-    filter.correctionLevel = "M"
-
-    guard let output = filter.outputImage else { return nil }
-    let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
-    guard let cgImage = ciContext.createCGImage(scaled, from: scaled.extent) else { return nil }
-    return UIImage(cgImage: cgImage)
   }
 }
 

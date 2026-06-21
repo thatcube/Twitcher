@@ -377,7 +377,7 @@ struct SettingsView: View {
           Image("twitch-logo")
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .frame(height: 40)
+            .frame(height: 52)
 
           VStack(alignment: .leading, spacing: 4) {
             Text("Sign in with Twitch")
@@ -409,13 +409,19 @@ struct SettingsView: View {
       if youtubeAuth.isAuthenticated {
         VStack(alignment: .leading, spacing: 18) {
           HStack(spacing: 20) {
-            Image("youtube-logo")
-              .resizable()
-              .aspectRatio(contentMode: .fit)
-              .frame(height: 44)
+            CachedAsyncImage(url: youtubeAuth.profileImageURL) { image in
+              image.resizable().scaledToFill()
+            } placeholder: {
+              Image("youtube-logo")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .padding(10)
+            }
+            .frame(width: 64, height: 64)
+            .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 4) {
-              Text("YouTube connected")
+              Text(youtubeAuth.userDisplayName ?? "YouTube connected")
                 .font(.title3.weight(.semibold))
               Text(youTubeSubscriptionSubtitle)
                 .font(.callout)
@@ -462,7 +468,7 @@ struct SettingsView: View {
           Image("youtube-logo")
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .frame(height: 40)
+            .frame(height: 52)
 
           VStack(alignment: .leading, spacing: 4) {
             Text("Connect YouTube")
