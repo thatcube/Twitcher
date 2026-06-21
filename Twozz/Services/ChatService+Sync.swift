@@ -154,13 +154,14 @@ extension ChatService {
   /// into one array mutation.
   private func scheduleAppendFlush() {
     guard !appendFlushScheduled else { return }
+    let interval = adaptiveCoalesceInterval
     let elapsed = Date().timeIntervalSince(lastAppendFlushAt)
-    if elapsed >= appendCoalesceInterval {
+    if elapsed >= interval {
       flushPendingAppends()
       return
     }
     appendFlushScheduled = true
-    let delay = appendCoalesceInterval - elapsed
+    let delay = interval - elapsed
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
       guard let self else { return }
       self.appendFlushScheduled = false
@@ -192,8 +193,8 @@ extension ChatService {
 
     // Graceful shedding ONLY at extreme sustained rates: cap how many lines a
     // single flush appends, dropping the oldest within the burst (they'd be
-    // trimmed off the 500 cap within ~1s of a raid anyway). Below the threshold
-    // every message renders — normal/small streams are never touched.
+    // trimmed off the buffer cap within ~1s of a raid anyway). Below the
+    // threshold every message renders — normal/small streams are never touched.
     if smoothedMessageRate > extremeMessageRateThreshold,
       batch.count > maxMessagesPerFlushUnderLoad {
       batch.removeFirst(batch.count - maxMessagesPerFlushUnderLoad)

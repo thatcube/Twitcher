@@ -188,7 +188,13 @@ extension PlayerView {
     // coasts to a stop a fraction of a message short still rejoins the live feed
     // instead of stranding the chat frozen just above it.
     if idx >= lastIndex - 0.5 {
-      resumeChatLive()
+      // A swipe/hold that coasts to the live bottom must hand focus back to the
+      // composer, exactly like the discrete down-press does (stepChatScroll →
+      // resumeChatLive(restoreFocus: true)). Without restoreFocus, the row's
+      // buttons re-enter the focus engine with focus unset and tvOS grabs the
+      // leftmost control (the channel button) instead of the message field.
+      // VOD has no composer, so leave its read-only focus handling unchanged.
+      resumeChatLive(restoreFocus: !isVOD)
       return false
     }
     let clamped = max(0, idx)
@@ -351,6 +357,14 @@ extension PlayerView {
       return
     }
 
+    // Arm the composer so it stays in the focus engine for the whole handoff.
+    // The composer disables itself (`chatInputFocusBlocked`) whenever focus sits
+    // on a control button. As the control row rejoins below, tvOS can briefly
+    // park focus on a button — which both disarms the composer (focus handler)
+    // and drops it out of the engine, so every `focus = .chatInput` re-assert
+    // silently fails and focus stays stranded on the leftmost control (the
+    // channel button). Keeping it armed lets the re-asserts actually land.
+    chatInputArmed = true
     // Render A: still "scrolling" (buttons stay removed), focus pinned on the
     // composer — which already holds it during the scroll, so this is a no-op
     // that simply prevents any competitor from grabbing it.
@@ -365,15 +379,20 @@ extension PlayerView {
       // Render B (next runloop): re-enable the control row now that focus is
       // firmly on the composer.
       isChatScrolling = false
+      chatInputArmed = true
       focus = chatScrollExitFocus
       // The control buttons re-enter the focus engine this tick; tvOS can still
-      // bounce focus onto the row as they materialise. Stomp any such bounce over
-      // the next few frames so focus snaps back to the composer before it can be
-      // seen, instead of leaving it stranded on a control button.
-      for _ in 0..<4 {
+      // bounce focus onto the row as they materialise — which also disarms the
+      // composer via the focus handler. Re-arm and re-assert over the next few
+      // frames so focus snaps back to the composer before it can be seen, instead
+      // of leaving it stranded on a control button.
+      for _ in 0..<8 {
         try? await Task.sleep(for: .milliseconds(16))
         if Task.isCancelled { return }
-        if focus != chatScrollExitFocus { focus = chatScrollExitFocus }
+        if focus != chatScrollExitFocus {
+          chatInputArmed = true
+          focus = chatScrollExitFocus
+        }
       }
       scheduleHide()
     }
