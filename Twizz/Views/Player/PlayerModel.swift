@@ -128,6 +128,34 @@ final class PlayerModel {
   /// Whether the active channel actually has a resolvable YouTube simulcast.
   /// Probed on channel load; gates the Stream Source picker in the quality menu.
   var youtubeSourceAvailable = false
+
+  // MARK: Stream Rewind (DVR) / scrub / VOD hand-off
+
+  /// True while the viewer has explicitly paused the live stream. Pausing keeps
+  /// the playhead in place while the DVR window keeps growing, so resuming/seeking
+  /// stays inside the retained window. Also gates the stall watchdog.
+  var isUserPaused = false
+  /// True while the viewer is actively scrubbing the rewind bar (analog jog).
+  var isScrubbing = false
+  /// Live scrub position (seconds on the player timeline) while a jog is in
+  /// progress; the actual `AVPlayerItem.seek` is throttled/coalesced against it.
+  var scrubTargetSeconds: Double?
+  /// Throttle clock for the coalesced scrub seeks issued during a jog.
+  var lastScrubSeekAt = Date.distantPast
+  /// Debounced "settle" that commits a final frame-accurate seek once jogging stops.
+  var scrubCommitTask: Task<Void, Never>?
+  /// True while the playhead is following the live edge (drives the LIVE pin).
+  var pinnedToLive = true
+  /// Selected VOD playback rate, reapplied across pause/resume/seek (live is 1.0).
+  var vodPlaybackRate: Float = 1.0
+
+  /// The channel's in-progress broadcast VOD, once resolved (for Stream Rewind
+  /// hand-off past the DVR floor). `nil` until resolved / when unavailable.
+  var liveVODHandoff: PlayerView.LiveVODHandoff?
+  /// When the in-progress VOD was last resolved; throttles re-resolves.
+  var lastBroadcastVODResolveAt = Date.distantPast
+  /// Guards against overlapping hand-off / return transitions.
+  var vodHandoffTransitionInFlight = false
 }
 
 extension PlayerView {
@@ -222,5 +250,45 @@ extension PlayerView {
   var youtubeSourceAvailable: Bool {
     get { model.youtubeSourceAvailable }
     nonmutating set { model.youtubeSourceAvailable = newValue }
+  }
+  var isUserPaused: Bool {
+    get { model.isUserPaused }
+    nonmutating set { model.isUserPaused = newValue }
+  }
+  var isScrubbing: Bool {
+    get { model.isScrubbing }
+    nonmutating set { model.isScrubbing = newValue }
+  }
+  var scrubTargetSeconds: Double? {
+    get { model.scrubTargetSeconds }
+    nonmutating set { model.scrubTargetSeconds = newValue }
+  }
+  var lastScrubSeekAt: Date {
+    get { model.lastScrubSeekAt }
+    nonmutating set { model.lastScrubSeekAt = newValue }
+  }
+  var scrubCommitTask: Task<Void, Never>? {
+    get { model.scrubCommitTask }
+    nonmutating set { model.scrubCommitTask = newValue }
+  }
+  var pinnedToLive: Bool {
+    get { model.pinnedToLive }
+    nonmutating set { model.pinnedToLive = newValue }
+  }
+  var vodPlaybackRate: Float {
+    get { model.vodPlaybackRate }
+    nonmutating set { model.vodPlaybackRate = newValue }
+  }
+  var liveVODHandoff: PlayerView.LiveVODHandoff? {
+    get { model.liveVODHandoff }
+    nonmutating set { model.liveVODHandoff = newValue }
+  }
+  var lastBroadcastVODResolveAt: Date {
+    get { model.lastBroadcastVODResolveAt }
+    nonmutating set { model.lastBroadcastVODResolveAt = newValue }
+  }
+  var vodHandoffTransitionInFlight: Bool {
+    get { model.vodHandoffTransitionInFlight }
+    nonmutating set { model.vodHandoffTransitionInFlight = newValue }
   }
 }
