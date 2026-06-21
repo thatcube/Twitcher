@@ -363,4 +363,73 @@ final class LowLatencyHLSProxyTests: XCTestCase {
 
     XCTAssertFalse(proxy.predictedUnstable, "reset must forget the prior channel session's verdict")
   }
+
+  // MARK: - Output encoding (direct-Data writer) invariants
+
+  /// The rewritten body must join lines with `"\n"` and carry no trailing
+  /// newline — exactly matching the previous `joined(separator: "\n")`
+  /// behaviour the direct-`Data` writer replaced.
+  func testRewrittenBodyHasNoTrailingNewline() {
+    let proxy = makeProxy()
+    let playlist = mediaPlaylist(
+      mediaSequence: 100,
+      segments: [("seg100", 2), ("seg101", 2)],
+      prefetch: ["seg102"])
+    let out = proxy.rewriteMediaPlaylistForTesting(
+      playlist, sourceURL: source, promotePrefetch: true, retainHistory: false)
+
+    XCTAssertFalse(out.hasSuffix("\n"), "no trailing newline should be introduced")
+    XCTAssertFalse(out.contains("\n\n"), "lines should be single-`\\n`-separated")
+  }
+
+  /// A passthrough rewrite (no promotion, no retention, no prefetch) must
+  /// reproduce the source bytes exactly — including CRLF line endings, which
+  /// the parser splits on `"\n"` (leaving `\r` attached) and the writer rejoins
+  /// with `"\n"`. This guards the direct-`Data` writer against mangling `\r\n`.
+  func testCRLFPassthroughIsByteExact() {
+    let proxy = makeProxy()
+    let lines = [
+      "#EXTM3U",
+      "#EXT-X-VERSION:3",
+      "#EXT-X-TARGETDURATION:2",
+      "#EXT-X-MEDIA-SEQUENCE:100",
+      "#EXTINF:2.000,",
+      "https://video.example/seg100.ts",
+      "#EXTINF:2.000,",
+      "https://video.example/seg101.ts",
+    ]
+    let crlf = lines.joined(separator: "\r\n")  // no trailing newline
+    let out = proxy.rewriteMediaPlaylistForTesting(
+      crlf, sourceURL: source, promotePrefetch: false, retainHistory: false)
+
+    XCTAssertEqual(out, crlf, "CRLF passthrough must be byte-for-byte identical")
+  }
+
+  // MARK: - DVR growth safety net
+
+  /// A degenerate stream whose segments all report zero duration would never
+  /// trip the seconds-based window slide, so the retained history (and its
+  /// `seenURLs` set) must instead be bounded by the hard segment-count cap.
+  func testZeroDurationHistoryIsCappedBySegmentCount() {
+    let proxy = makeProxy()
+    let overflow = LowLatencyHLSProxy.maxRetainedSegments + 250
+    var lines = [
+      "#EXTM3U",
+      "#EXT-X-VERSION:3",
+      "#EXT-X-TARGETDURATION:0",
+      "#EXT-X-MEDIA-SEQUENCE:0",
+    ]
+    for i in 0..<overflow {
+      lines.append("#EXTINF:0.000,")
+      lines.append("https://video.example/seg\(i).ts")
+    }
+    _ = proxy.rewriteMediaPlaylistForTesting(
+      lines.joined(separator: "\n"),
+      sourceURL: source, promotePrefetch: false, retainHistory: true, windowSeconds: 1800)
+
+    XCTAssertEqual(
+      proxy.retainedSegmentCountForTesting(sourceURL: source),
+      LowLatencyHLSProxy.maxRetainedSegments,
+      "zero-duration history must be capped by the segment-count safety net")
+  }
 }

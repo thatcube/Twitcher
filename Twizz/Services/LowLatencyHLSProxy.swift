@@ -200,9 +200,45 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
     private final class DVRBuffer {
         var segments: [MediaSegment] = []
         var seenURLs: Set<String> = []
+        /// Running sum of `segments` durations, maintained incrementally so the
+        /// per-refresh window slide doesn't re-reduce the whole array.
+        var totalDuration: Double = 0
         var firstSequence = 0
         var discontinuitySequence = 0
         var initialized = false
+    }
+
+    /// Hard safety cap on retained DVR segments (and therefore `seenURLs`),
+    /// independent of `dvrWindowSeconds`. A well-formed Twitch window stays far
+    /// below this; it only bounds a degenerate stream whose segment durations are
+    /// zero/missing (where the seconds-based window slide would never trigger and
+    /// the history — and its `seenURLs` set — would otherwise grow without bound).
+    static let maxRetainedSegments = 6000
+
+    /// Builds an HLS playlist body as `Data` by joining lines with `"\n"`,
+    /// matching `lines.joined(separator: "\n")` byte-for-byte (no trailing
+    /// newline) but without materializing the flattened `[String]` and the
+    /// intermediate joined `String` on the per-refresh hot path.
+    private struct PlaylistWriter {
+        var data = Data()
+        private var needsSeparator = false
+
+        init(reservingBytes bytes: Int) {
+            data.reserveCapacity(bytes)
+        }
+
+        mutating func append(_ line: String) {
+            if needsSeparator {
+                data.append(0x0A)  // "\n"
+            } else {
+                needsSeparator = true
+            }
+            data.append(contentsOf: line.utf8)
+        }
+
+        mutating func append(contentsOf lines: [String]) {
+            for line in lines { append(line) }
+        }
     }
 
     init(headers: [String: String]) {
@@ -393,12 +429,17 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         recordInstabilitySignals(parsed, sourceURL: sourceURL)
 
         guard retainHistory else {
-            var out = parsed.header
-            for seg in parsed.segments { out.append(contentsOf: seg.lines) }
+            var writer = PlaylistWriter(
+                reservingBytes: estimatedBytes(
+                    header: parsed.header,
+                    segments: parsed.segments,
+                    prefetch: promotePrefetch ? parsed.prefetch : []))
+            writer.append(contentsOf: parsed.header)
+            for seg in parsed.segments { writer.append(contentsOf: seg.lines) }
             if promotePrefetch {
-                for seg in parsed.prefetch { out.append(contentsOf: seg.lines) }
+                for seg in parsed.prefetch { writer.append(contentsOf: seg.lines) }
             }
-            return Data(out.joined(separator: "\n").utf8)
+            return writer.data
         }
 
         let key = sourceURL.absoluteString
@@ -412,33 +453,57 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
         for seg in parsed.segments where !buf.seenURLs.contains(seg.url) {
             buf.seenURLs.insert(seg.url)
             buf.segments.append(seg)
+            buf.totalDuration += seg.duration
         }
 
         // Slide the retained window: drop oldest segments past the cap, advancing
         // the media/discontinuity sequence counters so AVPlayer's accounting stays
-        // monotonic and correct.
-        var total = buf.segments.reduce(0.0) { $0 + $1.duration }
-        while total > dvrWindowSeconds, buf.segments.count > 1 {
+        // monotonic and correct. The duration window is the normal bound; the
+        // segment-count cap is a safety net so a degenerate zero-duration stream
+        // (where `totalDuration` never exceeds the window) can't grow unbounded.
+        while buf.segments.count > 1,
+            buf.totalDuration > dvrWindowSeconds
+                || buf.segments.count > Self.maxRetainedSegments
+        {
             let dropped = buf.segments.removeFirst()
             buf.seenURLs.remove(dropped.url)
-            total -= dropped.duration
+            buf.totalDuration -= dropped.duration
             buf.firstSequence += 1
             if dropped.isDiscontinuity { buf.discontinuitySequence += 1 }
         }
         dvrBuffers[key] = buf
 
-        var out = rebuildHeader(
+        let header = rebuildHeader(
             parsed.header,
             mediaSequence: buf.firstSequence,
             discontinuitySequence: buf.discontinuitySequence
         )
-        for seg in buf.segments { out.append(contentsOf: seg.lines) }
+        var writer = PlaylistWriter(
+            reservingBytes: estimatedBytes(
+                header: header,
+                segments: buf.segments,
+                prefetch: promotePrefetch ? parsed.prefetch : []))
+        writer.append(contentsOf: header)
+        for seg in buf.segments { writer.append(contentsOf: seg.lines) }
         if promotePrefetch {
             for seg in parsed.prefetch where !buf.seenURLs.contains(seg.url) {
-                out.append(contentsOf: seg.lines)
+                writer.append(contentsOf: seg.lines)
             }
         }
-        return Data(out.joined(separator: "\n").utf8)
+        return writer.data
+    }
+
+    /// Rough byte budget for a rewritten media playlist, to pre-size the
+    /// `PlaylistWriter` and avoid repeated `Data` reallocations. An over-estimate
+    /// is harmless (it only reserves capacity); ~96 bytes/line covers a typical
+    /// `#EXTINF` + absolute segment URL pair with headroom.
+    private func estimatedBytes(
+        header: [String], segments: [MediaSegment], prefetch: [MediaSegment]
+    ) -> Int {
+        var lineCount = header.count
+        for seg in segments { lineCount += seg.lines.count }
+        for seg in prefetch { lineCount += seg.lines.count }
+        return lineCount * 96 + 64
     }
 
     /// Splits a media playlist into its header, sequence numbers, real segments
@@ -719,6 +784,12 @@ final class LowLatencyHLSProxy: NSObject, AVAssetResourceLoaderDelegate {
             self.dvrWindowSeconds = windowSeconds
             return String(decoding: rewriteMediaPlaylist(text, sourceURL: sourceURL), as: UTF8.self)
         }
+    }
+
+    /// Number of segments currently retained in the DVR buffer for a source.
+    /// Test-only seam for asserting window/cap behavior.
+    func retainedSegmentCountForTesting(sourceURL: URL) -> Int {
+        delegateQueue.sync { dvrBuffers[sourceURL.absoluteString]?.segments.count ?? 0 }
     }
 
     /// Rewrites the `#EXT-X-MEDIA-SEQUENCE` / `#EXT-X-DISCONTINUITY-SEQUENCE`

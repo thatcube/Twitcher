@@ -8,12 +8,14 @@ import SwiftUI
 ///
 /// `MeshGradient` is a single Metal-rendered pass, so this is dramatically
 /// cheaper than the previous stack of ~10 overlapping Gaussian blurs.
-/// Bridges the observable `AudioLevelMonitor` to `AudioVisualizerView` from
-/// within its own small view body. The monitor publishes `level` ~60 times a
-/// second; keeping the read here means those updates only invalidate this tiny
-/// container (and the orb that needs the value) instead of re-evaluating the
-/// whole ~3,700-line `PlayerView` body that hosts it. Purely a scoping wrapper —
-/// the visualizer renders identically.
+/// Bridges the observable `AudioLevelMonitor` to `AudioVisualizerView`. The
+/// monitor publishes `level` (and `syncLagMs`) ~60×/s, but both are
+/// `@ObservationIgnored` and read *inside* the visualizer's
+/// `TimelineView(.animation)` closure, so those 60Hz updates drive no SwiftUI
+/// invalidation at all — the orb stays perfectly smooth because the timeline
+/// already redraws every frame. Only low-rate fields (`isReceivingRealAudio`,
+/// `decodedSegmentCount`) remain observed. Purely a scoping wrapper — the
+/// visualizer renders identically.
 struct AudioVisualizerContainer: View {
   let monitor: AudioLevelMonitor
   let avatarURL: URL?
@@ -21,31 +23,20 @@ struct AudioVisualizerContainer: View {
 
   var body: some View {
     AudioVisualizerView(
-      level: monitor.level,
+      monitor: monitor,
       avatarURL: avatarURL,
-      palette: palette,
-      isReactive: monitor.isReceivingRealAudio,
-      debugInfo: String(
-        format: "%@  lvl %.2f  seg %d  q %d  lag %dms",
-        monitor.isReceivingRealAudio ? "REAL" : "AMBIENT",
-        monitor.level,
-        monitor.decodedSegmentCount,
-        monitor.pendingRealSamples,
-        monitor.syncLagMs
-      )
+      palette: palette
     )
   }
 }
 
 struct AudioVisualizerView: View {
-  let level: Double
+  /// Source of the audio `level` (and diagnostics). Read inside the per-frame
+  /// `TimelineView` closure so its 60Hz values never invalidate the host view.
+  let monitor: AudioLevelMonitor
   let avatarURL: URL?
   let palette: ThemePalette
   var showAvatar: Bool = true
-  /// Whether the level is real decoded audio (vs the ambient fallback) — shown
-  /// in a temporary on-screen readout while tuning reactivity.
-  var isReactive: Bool = false
-  var debugInfo: String? = nil
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var body: some View {
     GeometryReader { geo in
@@ -54,11 +45,20 @@ struct AudioVisualizerView: View {
       if reduceMotion {
         // Reduce Motion: a single static frame — no mesh drift, ring rotation,
         // or audio-reactive pulsing.
-        scene(side: side, t: 0, amp: 0)
+        scene(side: side, t: 0, amp: 0, debugInfo: nil, isReactive: false)
       } else {
         TimelineView(.animation) { timeline in
           let t = timeline.date.timeIntervalSinceReferenceDate
-          scene(side: side, t: t, amp: level)
+          // Reading the 60Hz `level`/`syncLagMs` here (not in the host body)
+          // keeps them off SwiftUI's observation graph — the orb is driven
+          // entirely by the timeline's per-frame redraw.
+          scene(
+            side: side,
+            t: t,
+            amp: monitor.level,
+            debugInfo: debugReadout(),
+            isReactive: monitor.isReceivingRealAudio
+          )
         }
       }
     }
@@ -66,7 +66,22 @@ struct AudioVisualizerView: View {
     .allowsHitTesting(false)
   }
 
-  private func scene(side: CGFloat, t: Double, amp: Double) -> some View {
+  /// Temporary diagnostic readout, rebuilt each frame from the monitor so it
+  /// reflects the live 60Hz values without triggering host invalidation.
+  private func debugReadout() -> String {
+    String(
+      format: "%@  lvl %.2f  seg %d  q %d  lag %dms",
+      monitor.isReceivingRealAudio ? "REAL" : "AMBIENT",
+      monitor.level,
+      monitor.decodedSegmentCount,
+      monitor.pendingRealSamples,
+      monitor.syncLagMs
+    )
+  }
+
+  private func scene(
+    side: CGFloat, t: Double, amp: Double, debugInfo: String?, isReactive: Bool
+  ) -> some View {
     ZStack {
       MeshGradient(
         width: 3,
@@ -83,7 +98,7 @@ struct AudioVisualizerView: View {
     }
     .overlay(alignment: .topLeading) {
       if let debugInfo {
-        debugBadge(debugInfo)
+        debugBadge(debugInfo, isReactive: isReactive)
       }
     }
   }
@@ -200,7 +215,7 @@ struct AudioVisualizerView: View {
     .animation(.easeOut(duration: 0.12), value: amp)
   }
 
-  private func debugBadge(_ text: String) -> some View {
+  private func debugBadge(_ text: String, isReactive: Bool) -> some View {
     Text(text)
       .font(.system(size: 22, weight: .semibold, design: .monospaced))
       .foregroundStyle(isReactive ? Color.green : Color.orange)

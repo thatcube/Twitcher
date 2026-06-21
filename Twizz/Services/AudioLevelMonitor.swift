@@ -14,8 +14,12 @@ import QuartzCore
 @MainActor
 @Observable
 final class AudioLevelMonitor {
-  /// Smoothed amplitude the visualizer renders, `0...1`.
-  private(set) var level: Double = 0
+  /// Smoothed amplitude the visualizer renders, `0...1`. Written ~60×/s by the
+  /// per-frame ticker, so it is `@ObservationIgnored`: the orb reads it *inside*
+  /// `AudioVisualizerView`'s `TimelineView(.animation)` closure (which already
+  /// redraws every frame), and observing it would needlessly invalidate the host
+  /// view 60×/s on top of that.
+  @ObservationIgnored private(set) var level: Double = 0
 
   /// True while the decoder is actively feeding real loudness values.
   private(set) var isReceivingRealAudio = false
@@ -26,14 +30,18 @@ final class AudioLevelMonitor {
   private(set) var decodedSegmentCount = 0
   var pendingRealSamples: Int { realQueue.count }
   /// Signed gap (ms) between the player's position and the loudness sample we're
-  /// showing — near zero means well aligned. Temporary diagnostic.
-  private(set) var syncLagMs: Int = 0
+  /// showing — near zero means well aligned. Temporary diagnostic. Also written
+  /// ~60×/s, so `@ObservationIgnored` for the same reason as `level`; the debug
+  /// badge reads it inside the visualizer's per-frame `TimelineView` closure.
+  @ObservationIgnored private(set) var syncLagMs: Int = 0
 
   // Internal mechanism state is deliberately excluded from observation: only the
-  // view-facing diagnostics above (`level`, `isReceivingRealAudio`,
-  // `decodedSegmentCount`, `syncLagMs`) should drive SwiftUI invalidation. In
-  // particular `realQueue` mutates ~60Hz; observing it would invalidate the
-  // visualizer's host view every tick on top of its own `TimelineView` redraw.
+  // low-rate, view-facing diagnostics (`isReceivingRealAudio`,
+  // `decodedSegmentCount`) drive SwiftUI invalidation. The 60Hz values (`level`,
+  // `syncLagMs`) are `@ObservationIgnored` and read inside the visualizer's
+  // `TimelineView`; in particular `realQueue` mutates ~60Hz, so observing it
+  // would invalidate the visualizer's host view every tick on top of its own
+  // `TimelineView` redraw.
   @ObservationIgnored private var decoder: AudioOnlyLevelDecoder?
   @ObservationIgnored private var ticker: Timer?
   @ObservationIgnored private var startTime = CACurrentMediaTime()

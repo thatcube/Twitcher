@@ -190,6 +190,20 @@ extension PlayerView {
 
   func makeItem(url: URL) -> AVPlayerItem {
     currentSourceURL = url
+    // Detach the outgoing item's resources before building its replacement so
+    // nothing accumulates across quality/channel switches:
+    //  - remove the previous decode-freeze frame tap (an AVPlayerItemVideoOutput
+    //    left attached to a discarded item leaks; it only feeds the watchdog, so
+    //    dropping it has no user-visible effect), and
+    //  - clear the low-latency proxy's resource-loader delegate off the old
+    //    (possibly proxied) AVURLAsset so stale loading requests for the
+    //    discarded asset can't keep routing into the proxy.
+    if let oldItem = player.currentItem {
+      if let oldOutput = playerItemVideoOutput, oldItem.outputs.contains(oldOutput) {
+        oldItem.remove(oldOutput)
+      }
+      (oldItem.asset as? AVURLAsset)?.resourceLoader.setDelegate(nil, queue: nil)
+    }
     // The proxy is attached when EITHER low-latency promotion OR Stream Rewind
     // (DVR retention) is on. Each behavior is independent: promotion pulls the
     // live edge in, retention grows the seekable window for rewind.
