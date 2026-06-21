@@ -1,6 +1,4 @@
-import CoreImage.CIFilterBuiltins
 import SwiftUI
-import UIKit
 
 /// Full-screen YouTube account sign-in, mirroring `SignInView` but driving the
 /// Google device flow. When signed out it shows a QR to scan plus the activation
@@ -49,15 +47,6 @@ struct YouTubeSignInView: View {
 
   private var signInContent: some View {
     VStack(spacing: 64) {
-      HStack(spacing: 28) {
-        Image("youtube-logo")
-          .resizable()
-          .aspectRatio(contentMode: .fit)
-          .frame(height: 56)
-        Text("Sign in to YouTube")
-          .font(.system(size: 52, weight: .bold))
-      }
-
       HStack(alignment: .center, spacing: 96) {
         qrOption
         orDivider
@@ -78,7 +67,7 @@ struct YouTubeSignInView: View {
       }
     }
     .padding(.horizontal, 96)
-    .padding(.top, 120)
+    .padding(.top, 168)
     .padding(.bottom, 40)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
   }
@@ -140,22 +129,7 @@ struct YouTubeSignInView: View {
   @ViewBuilder
   private var qrCodeView: some View {
     let payload = auth.verificationURI ?? "https://www.google.com/device"
-
-    Group {
-      if let image = Self.makeQRCode(from: payload) {
-        Image(uiImage: image)
-          .interpolation(.none)
-          .resizable()
-          .scaledToFit()
-      } else {
-        RoundedRectangle(cornerRadius: 16)
-          .fill(Color.white.opacity(0.1))
-          .overlay(ProgressView())
-      }
-    }
-    .frame(width: 460, height: 460)
-    .padding(32)
-    .background(Color.white, in: RoundedRectangle(cornerRadius: 36))
+    BrandQRCodeView(payload: payload, logoName: "youtube-logo")
   }
 
   @ViewBuilder
@@ -229,21 +203,6 @@ struct YouTubeSignInView: View {
       }
       Button("Cancel", role: .cancel) {}
     }
-  }
-
-  // MARK: - QR generation
-
-  private static let ciContext = CIContext()
-
-  private static func makeQRCode(from string: String) -> UIImage? {
-    let filter = CIFilter.qrCodeGenerator()
-    filter.message = Data(string.utf8)
-    filter.correctionLevel = "M"
-
-    guard let output = filter.outputImage else { return nil }
-    let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
-    guard let cgImage = ciContext.createCGImage(scaled, from: scaled.extent) else { return nil }
-    return UIImage(cgImage: cgImage)
   }
 }
 

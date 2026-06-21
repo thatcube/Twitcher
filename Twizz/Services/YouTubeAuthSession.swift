@@ -24,6 +24,12 @@ final class YouTubeAuthSession {
   var statusMessage: String?
   var errorMessage: String?
 
+  /// The signed-in viewer's channel title and avatar, fetched once after sign-in
+  /// via `channels.list(mine=true)` (1 quota unit). Optional — the UI falls back
+  /// to the YouTube logo when these aren't available.
+  var userDisplayName: String?
+  var profileImageURL: URL?
+
   private let userDefaults: UserDefaults =
     UserDefaults(suiteName: TopShelf.appGroupID) ?? .standard
   private var pollTask: Task<Void, Never>?
@@ -33,6 +39,8 @@ final class YouTubeAuthSession {
     static let accessToken = "youtube.auth.accessToken"
     static let refreshToken = "youtube.auth.refreshToken"
     static let expiry = "youtube.auth.expiry"
+    static let displayName = "youtube.auth.displayName"
+    static let profileImage = "youtube.auth.profileImageURL"
   }
 
   /// Whether the OAuth client credentials are present (so the UI can hide the
@@ -49,11 +57,16 @@ final class YouTubeAuthSession {
     accessToken = userDefaults.string(forKey: StorageKey.accessToken)
     refreshToken = userDefaults.string(forKey: StorageKey.refreshToken)
     accessTokenExpiry = userDefaults.object(forKey: StorageKey.expiry) as? Date
+    userDisplayName = userDefaults.string(forKey: StorageKey.displayName)
+    profileImageURL = userDefaults.string(forKey: StorageKey.profileImage).flatMap(URL.init(string:))
     // A usable session needs a refresh token; the access token may already be
     // stale and will be refreshed on first use.
     isAuthenticated = refreshToken != nil
     statusMessage = nil
     errorMessage = nil
+    if isAuthenticated {
+      Task { await fetchProfile() }
+    }
   }
 
   func signOut() {
@@ -72,9 +85,13 @@ final class YouTubeAuthSession {
     accessToken = nil
     refreshToken = nil
     accessTokenExpiry = nil
+    userDisplayName = nil
+    profileImageURL = nil
     userDefaults.removeObject(forKey: StorageKey.accessToken)
     userDefaults.removeObject(forKey: StorageKey.refreshToken)
     userDefaults.removeObject(forKey: StorageKey.expiry)
+    userDefaults.removeObject(forKey: StorageKey.displayName)
+    userDefaults.removeObject(forKey: StorageKey.profileImage)
   }
 
   private func persistTokens(
@@ -199,6 +216,7 @@ final class YouTubeAuthSession {
         activationCode = nil
         statusMessage = "Signed in to YouTube."
         errorMessage = nil
+        Task { await fetchProfile() }
         return
       } catch let error as YouTubePollingError {
         switch error {
@@ -233,6 +251,46 @@ final class YouTubeAuthSession {
     if !Task.isCancelled {
       errorMessage = "YouTube sign-in timed out."
       isAuthenticating = false
+    }
+  }
+
+  // MARK: - Profile
+
+  /// Fetches the signed-in viewer's own channel (title + avatar) via
+  /// `channels.list(part=snippet, mine=true)` — 1 quota unit, OAuth-gated. Best
+  /// effort: failures are swallowed so the UI just keeps showing the logo.
+  func fetchProfile() async {
+    guard isAuthenticated else { return }
+    do {
+      let token = try await validAccessToken()
+      var components = URLComponents(
+        url: YouTubeConfig.apiBaseURL.appendingPathComponent("channels"),
+        resolvingAgainstBaseURL: false)!
+      components.queryItems = [
+        URLQueryItem(name: "part", value: "snippet"),
+        URLQueryItem(name: "mine", value: "true"),
+      ]
+
+      var request = URLRequest(url: components.url!)
+      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+      request.timeoutInterval = 20
+
+      let (data, response) = try await URLSession.shared.data(for: request)
+      let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+      guard (200...299).contains(status) else { return }
+
+      let decoded = try JSONDecoder().decode(ChannelsResponse.self, from: data)
+      guard let snippet = decoded.items.first?.snippet else { return }
+
+      userDisplayName = snippet.title
+      userDefaults.set(snippet.title, forKey: StorageKey.displayName)
+
+      if let url = snippet.thumbnails?.bestURL {
+        profileImageURL = url
+        userDefaults.set(url.absoluteString, forKey: StorageKey.profileImage)
+      }
+    } catch {
+      // Non-fatal: the signed-in UI falls back to the YouTube logo.
     }
   }
 
@@ -374,6 +432,34 @@ private struct OAuthErrorPayload: Decodable {
   private enum CodingKeys: String, CodingKey {
     case error
     case errorDescription = "error_description"
+  }
+}
+
+private struct ChannelsResponse: Decodable {
+  let items: [Item]
+
+  struct Item: Decodable {
+    let snippet: Snippet
+  }
+
+  struct Snippet: Decodable {
+    let title: String
+    let thumbnails: Thumbnails?
+  }
+
+  struct Thumbnails: Decodable {
+    let `default`: Thumb?
+    let medium: Thumb?
+    let high: Thumb?
+
+    /// Highest-resolution avatar available.
+    var bestURL: URL? {
+      (high ?? medium ?? `default`)?.url.flatMap(URL.init(string:))
+    }
+
+    struct Thumb: Decodable {
+      let url: String?
+    }
   }
 }
 
