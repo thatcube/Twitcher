@@ -5,7 +5,7 @@
 <h1 align="center">Twizz</h1>
 
 <p align="center">
-  A free, open-source Apple TV app for watching Twitch with a fast, chat-first viewing experience and native external emote support.
+  A free, open-source Apple TV app for watching Twitch. It's fast and chat-first, with native external emotes, multi-view, and optional YouTube and Kick support.
 </p>
 
 <p align="center">
@@ -18,7 +18,8 @@
 
 Sign in & navigation:
 
-- Sign in with Twitch using the Device Code flow (approve on your phone or browser); tokens are stored securely and refresh automatically.
+- Sign in with Twitch using the Device Code flow. Scan the QR code or type the short code on your phone or browser to approve. Tokens are stored securely and refresh on their own.
+- Optionally sign in to YouTube as well (Google's device flow), so Twizz can see which of your YouTube subscriptions are live.
 - Four tabs: Home, Browse, Search, and Settings.
 
 Home & discovery:
@@ -33,13 +34,18 @@ Home & discovery:
 Playback:
 
 - Live playback on real Apple TV hardware, with a side-by-side layout: video on the left, chat pane on the right.
+- Multi-view: pick a few live channels and watch them together in a grid. The picker doubles as a discovery surface, with Following, Recommended, and Popular rails.
+- A native in-player Playback menu that gathers Quality, Source, Rewind, Viewer Count, Captions, and the Sleep timer in one place, with a Diagnostics submenu for the nerdy stuff.
 - Quality picker with persistence (`Auto` + explicit qualities), ordered highest-to-lowest.
+- Source switching when a streamer simulcasts: if they're also live on YouTube, Twizz can play the YouTube source, which is often lower latency. It'll default to that source when one is available.
+- Live viewer counts in the player, shown side by side per platform (Twitch, YouTube, Kick) with each platform's logo.
+- Live captions that follow whichever source you're watching.
 - Low-latency mode (on by default) that closes most of the gap to the live edge.
 - Stream rewind (DVR): seek back within the live window.
-- Audio-only mode with a reactive audio visualizer — handy for music, just-chatting, or background listening.
+- Audio-only mode with a reactive audio visualizer, handy for music, just-chatting, or background listening.
 - Custom bottom overlay controls built for the tvOS focus engine.
-- Sleep timer tucked inside the quality menu (timed or "end of stream") with a "still watching?" check, an animated starry "Sleeping" screen, and one-press resume that snaps back to the live edge.
-- VOD and clip playback from channel pages; VODs include synced chat replay and variable speed (0.5×–2×).
+- Sleep timer (timed or "end of stream") with a "still watching?" check, an animated starry "Sleeping" screen, and one-press resume that snaps back to the live edge.
+- VOD and clip playback from channel pages. VODs include synced chat replay and variable speed (0.5×–2×).
 - Optional diagnostics overlay for latency and buffer stats.
 
 Chat:
@@ -52,7 +58,7 @@ Chat:
 - Incoming and outgoing raid banners.
 - Live polls, predictions, hype trains, and creator goals surfaced as passive, display-only overlays.
 - "Just went live" toast for followed channels, with one tap to switch over.
-- Experimental: merge a YouTube live chat into the Twitch chat pane.
+- Multistream chat merge (experimental): when a streamer is also live on YouTube or Kick, Twizz can fold those chats into the Twitch pane so it's all in one place. On by default, and reads anonymously.
 
 Appearance:
 
@@ -63,7 +69,11 @@ Appearance:
 
 - Swift / SwiftUI targeting tvOS.
 - AVPlayer-backed playback with custom overlay controls and an in-process low-latency HLS proxy.
+- Multi-view that runs several AVPlayer instances at once in a focus-driven grid.
 - Twitch EventSub / Hermes for real-time raids, polls, predictions, and live events.
+- Optional YouTube sign-in via Google's limited-input device flow, using the YouTube Data API (`youtube.readonly`) to surface your live subscriptions.
+- YouTube simulcast playback and a Kick chat read (over Kick's public Pusher socket) for the multistream features.
+- A live captions engine that follows whichever source you're watching.
 - A Top Shelf app extension for the tvOS home screen.
 - XcodeGen project generation (`project.yml` is source of truth).
 
@@ -131,6 +141,34 @@ regenerates the Xcode project. Without it, builds fail with
 
 On Apple TV, sign-in uses Twitch Device Code flow: start sign-in on TV, then complete approval on your phone/browser (including the Twitch mobile app browser flow) using the shown code/link.
 
+### Optional: YouTube sign-in
+
+YouTube sign-in is optional and the app runs fine without it. When configured, it
+lets Twizz show which of your YouTube subscriptions are live, next to your Twitch
+follows. It uses Google's limited-input device flow and the read-only
+`youtube.readonly` scope (Twizz never changes anything on your account).
+
+To enable it for a build, create an OAuth client in the
+Google Cloud Console (APIs & Services → Credentials → "TVs and Limited Input
+devices"), then:
+
+1. Copy [Config/YouTubeSecrets.xcconfig.local.example](Config/YouTubeSecrets.xcconfig.local.example) to `Config/YouTubeSecrets.xcconfig.local`.
+2. Set your values:
+
+```xcconfig
+YOUTUBE_CLIENT_ID = your_youtube_client_id
+YOUTUBE_CLIENT_SECRET = your_youtube_client_secret
+```
+
+Like the Twitch secret, `*.xcconfig.local` is gitignored, so these stay local. If
+they're absent, Twizz simply hides YouTube sign-in.
+
+Shipping the YouTube feature publicly also means getting Google to verify the
+OAuth consent screen (it starts in test-only mode). See
+[docs/google-oauth-verification.md](docs/google-oauth-verification.md) for the
+process and [docs/privacy-policy.md](docs/privacy-policy.md) for the matching
+privacy policy.
+
 ## Versioning & Releases
 
 Twizz follows the standard Apple two-number scheme, and both numbers update
@@ -166,6 +204,8 @@ lanes: `fastlane build` (archive only, no upload), `fastlane release`,
 
 Apple TV has no official Twitch playback SDK. Twizz resolves playback via Twitch GraphQL PlaybackAccessToken and Usher HLS playlists, similar in spirit to open-source clients like Streamlink and Frosty.
 
+When a streamer also simulcasts on YouTube, Twizz can play that YouTube source instead, which is often closer to the live edge. It'll default to the YouTube source when one is available, and you can switch sources from the in-player Playback menu.
+
 This project is non-commercial and ad-respecting.
 
 ## Not Supported: Auto-Redeeming Channel Points
@@ -180,7 +220,7 @@ Twizz can show who you follow, but Twitch now blocks follow/unfollow mutations f
 
 A running list of things we're considering but haven't built yet:
 
-- **Multi-view & Picture-in-Picture** — watch two streams at once, or shrink the player to a corner while you browse for the next channel.
+- **Picture-in-Picture** — shrink the player to a corner while you browse for the next channel. (Multi-view already shipped.)
 - **SharePlay watch-together** — sync playback (and a shared reaction layer) over FaceTime; a social differentiator unique to the Apple ecosystem.
 - **Moderator mode** — timeout / ban / delete and a mod-action log from the couch for users who mod.
 - **Chat keyword highlights + mention ping** — client-side highlighting for keywords and your username in busy chats.
