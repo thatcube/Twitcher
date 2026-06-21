@@ -416,48 +416,12 @@ struct PlayerView: View {
   // monitoring never invalidates the whole player; only the latency badge and
   // rewind transport observe the `@Observable` readouts. See `PlayerModel.swift`.
 
-  // MARK: Stream Rewind (DVR)
-  /// True while the viewer has explicitly paused the live stream. Pausing keeps
-  /// the playhead in place while the DVR window keeps growing, so resuming/seeking
-  /// stays inside the retained window. Also gates the stall watchdog so an
-  /// intentional pause is never mistaken for a freeze.
-  @State var isUserPaused = false
-  /// True while the viewer is actively scrubbing the rewind bar (analog trackpad
-  /// glide). Gates the latency monitor's rate-force and the stall watchdog so
-  /// repositioning the playhead is never mistaken for a freeze or fought.
-  @State var isScrubbing = false
-  /// Live scrub position (seconds on the player timeline) while a trackpad jog is
-  /// in progress. The orb tracks this instantly for buttery feedback; the actual
-  /// `AVPlayerItem.seek` is throttled/coalesced against it.
-  @State var scrubTargetSeconds: Double?
-  /// Throttle clock for the coalesced scrub seeks issued during a jog.
-  @State var lastScrubSeekAt = Date.distantPast
-  /// Debounced "settle" that commits a final frame-accurate seek and clears the
-  /// intended position once rapid stepping/jogging stops.
-  @State var scrubCommitTask: Task<Void, Never>?
-  /// True while the playhead is following the live edge. The real seekable edge
-  /// quantizes in segment-sized steps, so `behindLiveSeconds` wobbles a few
-  /// seconds even when "at live"; this flag lets us pin the orb to the right edge
-  /// and show LIVE deterministically until the viewer actually rewinds.
-  @State var pinnedToLive = true
-  /// Selected VOD playback rate. Applied whenever VOD playback (re)starts so it
-  /// survives pause/resume and seek. Ignored for live (always 1.0).
-  @State var vodPlaybackRate: Float = 1.0
-
-  // MARK: - Stream Rewind → in-progress VOD hand-off
-
-  /// The channel's in-progress broadcast VOD, once resolved. `isActive` flips when
-  /// playback has actually crossed the DVR floor into the VOD. `nil` means either
-  /// not yet resolved or no VOD is available for hand-off.
-  @State var liveVODHandoff: LiveVODHandoff?
-  /// When we last attempted to resolve the in-progress VOD. Throttles re-resolves
-  /// so a viewer who reaches the floor before the VOD is available retries later
-  /// (rather than hammering the network or giving up forever). Reset on channel
-  /// switch / raid alongside the DVR buffers.
-  @State var lastBroadcastVODResolveAt = Date.distantPast
-  /// Guards against firing overlapping hand-off / return transitions while one is
-  /// already in flight.
-  @State var vodHandoffTransitionInFlight = false
+  // MARK: Stream Rewind (DVR) / scrub / VOD hand-off
+  // The rewind/scrub/VOD-handoff engine state (isUserPaused, isScrubbing,
+  // scrubTargetSeconds, lastScrubSeekAt, scrubCommitTask, pinnedToLive,
+  // vodPlaybackRate, liveVODHandoff, lastBroadcastVODResolveAt,
+  // vodHandoffTransitionInFlight) now lives on `PlayerModel` and is reached via
+  // forwarding accessors; see `PlayerModel.swift` for the per-property docs.
 
   var wallClockLatencySeconds: Double? {
     get { mon.wallClockLatencySeconds }
