@@ -156,6 +156,21 @@ final class PlayerModel {
   var lastBroadcastVODResolveAt = Date.distantPast
   /// Guards against overlapping hand-off / return transitions.
   var vodHandoffTransitionInFlight = false
+
+  // MARK: Diagnostics (experimental troubleshooting overlay)
+  // Counters and a rolling event log so freezes/jumps can be observed on-device
+  // and reported back, rather than inferred. Only meaningful while the overlay
+  // toggle is on; reset on each fresh load.
+  var diagStallCount = 0
+  var diagJumpCount = 0
+  var diagReloadCount = 0
+  var diagEvents: [DiagnosticsEvent] = []
+  var diagLastPlayheadSeconds: Double?
+  var diagLastSampleAt: Date?
+  var diagWasStalled = false
+  var diagIsFrozen = false
+  var diagFrozenSince: Date?
+  var diagSessionStartedAt: Date?
 }
 
 extension PlayerView {
@@ -290,5 +305,45 @@ extension PlayerView {
   var vodHandoffTransitionInFlight: Bool {
     get { model.vodHandoffTransitionInFlight }
     nonmutating set { model.vodHandoffTransitionInFlight = newValue }
+  }
+  var diagStallCount: Int {
+    get { model.diagStallCount }
+    nonmutating set { model.diagStallCount = newValue }
+  }
+  var diagJumpCount: Int {
+    get { model.diagJumpCount }
+    nonmutating set { model.diagJumpCount = newValue }
+  }
+  var diagReloadCount: Int {
+    get { model.diagReloadCount }
+    nonmutating set { model.diagReloadCount = newValue }
+  }
+  var diagEvents: [DiagnosticsEvent] {
+    get { model.diagEvents }
+    nonmutating set { model.diagEvents = newValue }
+  }
+  var diagLastPlayheadSeconds: Double? {
+    get { model.diagLastPlayheadSeconds }
+    nonmutating set { model.diagLastPlayheadSeconds = newValue }
+  }
+  var diagLastSampleAt: Date? {
+    get { model.diagLastSampleAt }
+    nonmutating set { model.diagLastSampleAt = newValue }
+  }
+  var diagWasStalled: Bool {
+    get { model.diagWasStalled }
+    nonmutating set { model.diagWasStalled = newValue }
+  }
+  var diagIsFrozen: Bool {
+    get { model.diagIsFrozen }
+    nonmutating set { model.diagIsFrozen = newValue }
+  }
+  var diagFrozenSince: Date? {
+    get { model.diagFrozenSince }
+    nonmutating set { model.diagFrozenSince = newValue }
+  }
+  var diagSessionStartedAt: Date? {
+    get { model.diagSessionStartedAt }
+    nonmutating set { model.diagSessionStartedAt = newValue }
   }
 }

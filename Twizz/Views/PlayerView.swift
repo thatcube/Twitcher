@@ -705,19 +705,8 @@ struct PlayerView: View {
   let broadcastVODResolveCooldownSeconds: Double = 30
 
   // MARK: Diagnostics (experimental troubleshooting overlay)
-  // Counters and a rolling event log so freezes/jumps can be observed on-device
-  // and reported back, rather than inferred. Only meaningful while the overlay
-  // toggle is on; reset on each fresh load.
-  @State var diagStallCount = 0
-  @State var diagJumpCount = 0
-  @State var diagReloadCount = 0
-  @State var diagEvents: [DiagnosticsEvent] = []
-  @State var diagLastPlayheadSeconds: Double?
-  @State var diagLastSampleAt: Date?
-  @State var diagWasStalled = false
-  @State var diagIsFrozen = false
-  @State var diagFrozenSince: Date?
-  @State var diagSessionStartedAt: Date?
+  // The diagnostics counters / rolling event log / freeze-tracking state now live
+  // on `PlayerModel` and are reached via forwarding accessors.
 
   let controlsAutoHideSeconds: Double = 10
   /// How much live history the Stream Rewind DVR retains (and therefore how far
