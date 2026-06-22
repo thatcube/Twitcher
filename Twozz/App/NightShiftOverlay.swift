@@ -41,42 +41,70 @@ private struct NightShiftTintView: View {
 
 // MARK: - Installer
 
-/// Finds the active window scene and lazily creates the overlay window once,
-/// then keeps it alive for the app's lifetime. Lives as a hidden representable
-/// inside the root view so it gets a `window` (hence a `windowScene`) to attach
-/// to.
+/// Creates the overlay window once a window scene is available and keeps it alive
+/// for the app's lifetime. It lives as a hidden representable inside the root view
+/// purely so SwiftUI gives it a lifecycle hook; the actual window is attached to
+/// the active `UIWindowScene`, retrying until the scene has connected (the scene
+/// is often not ready on the very first layout pass).
 private struct NightShiftOverlayInstaller: UIViewRepresentable {
   var manager: NightShiftManager
 
-  func makeCoordinator() -> Coordinator { Coordinator() }
+  func makeCoordinator() -> Coordinator { Coordinator(manager: manager) }
 
   func makeUIView(context: Context) -> UIView {
     let probe = UIView(frame: .zero)
     probe.isHidden = true
+    context.coordinator.installIfNeeded()
     return probe
   }
 
   func updateUIView(_ uiView: UIView, context: Context) {
-    guard context.coordinator.overlayWindow == nil,
-          let scene = uiView.window?.windowScene
-    else { return }
-
-    let window = NightShiftOverlayWindow(windowScene: scene)
-    window.isUserInteractionEnabled = false
-    // Above alerts and full-screen covers so the wash covers the whole app.
-    window.windowLevel = .alert + 1
-
-    let host = UIHostingController(rootView: NightShiftTintView(manager: manager))
-    host.view.backgroundColor = .clear
-    host.view.isUserInteractionEnabled = false
-    window.rootViewController = host
-    window.isHidden = false
-
-    context.coordinator.overlayWindow = window
+    context.coordinator.installIfNeeded()
   }
 
+  @MainActor
   final class Coordinator {
-    var overlayWindow: UIWindow?
+    private let manager: NightShiftManager
+    private var overlayWindow: UIWindow?
+    private var attempts = 0
+
+    init(manager: NightShiftManager) {
+      self.manager = manager
+    }
+
+    func installIfNeeded() {
+      guard overlayWindow == nil else { return }
+
+      guard let scene = Self.activeWindowScene() else {
+        // The scene can lag the first few layout passes — retry briefly.
+        attempts += 1
+        guard attempts < 60 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+          self?.installIfNeeded()
+        }
+        return
+      }
+
+      let window = NightShiftOverlayWindow(windowScene: scene)
+      window.frame = UIScreen.main.bounds
+      window.backgroundColor = .clear
+      window.isUserInteractionEnabled = false
+      // Above alerts and full-screen covers so the wash covers the whole app.
+      window.windowLevel = .alert + 1
+
+      let host = UIHostingController(rootView: NightShiftTintView(manager: manager))
+      host.view.backgroundColor = .clear
+      host.view.isUserInteractionEnabled = false
+      window.rootViewController = host
+      window.isHidden = false
+
+      overlayWindow = window
+    }
+
+    private static func activeWindowScene() -> UIWindowScene? {
+      let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+      return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    }
   }
 }
 
