@@ -61,6 +61,10 @@ enum PersistenceKey {
   // MARK: Appearance & display preferences (also bound via `@AppStorage` in views)
 
   static let appTheme = "appTheme"
+  static let nightShiftEnabled = "nightShiftEnabled"
+  static let nightShiftRegion = "nightShiftRegionID"
+  static let nightShiftWarmth = "nightShiftWarmth"
+  static let nightShiftStrength = "nightShiftStrength"
   static let streamCardSize = "streamCardSize"
   static let streamLanguageFilter = "streamLanguageFilter"
   static let showYouTubeSubscriptions = "showYouTubeSubscriptions"

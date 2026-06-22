@@ -41,6 +41,7 @@ struct SettingsView: View {
               onClearWatchHistory: onClearWatchHistory,
               onResetNotInterested: onResetNotInterested
             )
+            SettingsNightShiftSection()
             SettingsAccountSection(
               onRequestSignIn: onRequestSignIn,
               onAccountChanged: onAccountChanged

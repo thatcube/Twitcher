@@ -23,6 +23,7 @@ struct TwozzApp: App {
           deepLinkRouter.handle(url)
         }
         .resolveGlassDisabled()
+        .installNightShiftOverlay(environment.nightShift)
     }
   }
 }

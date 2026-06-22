@@ -49,6 +49,8 @@ final class AppEnvironment {
   let youtubeResolver = YouTubeLiveResolver()
   /// Active theme selection + palette resolution.
   let themeManager = ThemeManager()
+  /// Night Shift warm-wash schedule + live tint.
+  let nightShift = NightShiftManager()
   /// Watches followed channels for "just went live" toasts.
   let goLive = GoLiveWatcher()
   /// Per-channel go-live notification opt-outs.
