@@ -27,26 +27,26 @@ enum NightShiftWarmth: String, CaseIterable, Identifiable, Codable {
     }
   }
 
-  /// Hue of the warm layer (a genuine orange/red — it sits *over* the dim layer,
-  /// so it can be vivid without lifting blacks much at the low alphas below).
+  /// The filter colour — a **pure red** (no green, no blue). Drawn source-over
+  /// (see `NightShiftTintView`), a pure red scales the green and blue channels of
+  /// the content behind it down by the layer's alpha while preserving red, so the
+  /// screen shifts toward red like the system Color Filters — never an orange or
+  /// white cast. Every level uses the same red; only the strength below changes.
   var tint: Color {
     switch self {
     case .none: return .clear
-    case .warm: return Color(red: 1.00, green: 0.55, blue: 0.20)
-    case .warmer: return Color(red: 1.00, green: 0.42, blue: 0.12)
-    case .warmest: return Color(red: 1.00, green: 0.30, blue: 0.06)
+    default: return Color(red: 1.0, green: 0.0, blue: 0.0)
     }
   }
 
-  /// Peak opacity of the warm layer at the deepest point of night. Kept modest
-  /// so the warm cast reads on the bright parts of the image while dark areas
-  /// stay dark.
+  /// Strength of the red filter at the deepest point of night — i.e. how far the
+  /// green/blue channels are pulled out. Higher = deeper, more saturated red.
   var peakOpacity: Double {
     switch self {
     case .none: return 0.0
-    case .warm: return 0.12
-    case .warmer: return 0.18
-    case .warmest: return 0.26
+    case .warm: return 0.35
+    case .warmer: return 0.55
+    case .warmest: return 0.78
     }
   }
 }

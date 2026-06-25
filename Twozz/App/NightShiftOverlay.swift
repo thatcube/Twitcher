@@ -23,11 +23,18 @@ private final class NightShiftOverlayWindow: UIWindow {
 
 // MARK: - Tint view
 
-/// The SwiftUI content the overlay window hosts: a black **dimming** layer (true
-/// brightness reduction — keeps blacks black) with a translucent **warm** layer
-/// on top for the color cast. Splitting them lets Dimness and Warmth be adjusted
-/// independently. `allowsHitTesting(false)` is belt-and-braces alongside the
-/// window's `hitTest` override.
+/// The SwiftUI content the overlay window hosts: a **red filter** layer for the
+/// colour cast with a black **dimming** layer on top for brightness reduction.
+/// Splitting them lets Warmth and Dimness be adjusted independently.
+///
+/// The filter colour is a *pure red* (zero green, zero blue). tvOS composites the
+/// overlay window over the app with normal source-over alpha (it does **not**
+/// honour a cross-window multiply/compositing filter), and source-over of a pure
+/// red is what gives the f.lux / Color-Filters look: the green and blue channels
+/// of whatever is behind get scaled down by the layer's alpha while red is kept,
+/// so the picture shifts toward red rather than gaining an orange/white cast.
+/// `allowsHitTesting(false)` is belt-and-braces alongside the window's `hitTest`
+/// override.
 private struct NightShiftTintView: View {
   var manager: NightShiftManager
 
