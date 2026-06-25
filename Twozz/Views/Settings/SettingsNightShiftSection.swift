@@ -9,10 +9,23 @@ struct SettingsNightShiftSection: View {
 
   @Environment(\.glassDisabled) private var glassDisabled
 
-  /// Which control currently holds focus. Focusing Dimness or Warmth flips the
-  /// overlay to full strength so the change is visible live as you pick options;
-  /// other controls leave the live schedule untouched.
-  private enum NSControl: Hashable { case location, dimness, warmth, preview }
+  /// Which control currently holds focus. Focusing either arrow of the Dimness or
+  /// Warmth stepper flips the overlay to full strength so each step is visible
+  /// live; other controls leave the live schedule untouched.
+  private enum NSControl: Hashable {
+    case location
+    case dimnessDown, dimnessUp
+    case warmthDown, warmthUp
+    case preview
+
+    /// True for the Dimness/Warmth stepper arrows, which drive the live preview.
+    var previewsLive: Bool {
+      switch self {
+      case .dimnessDown, .dimnessUp, .warmthDown, .warmthUp: return true
+      case .location, .preview: return false
+      }
+    }
+  }
   @FocusState private var focusedControl: NSControl?
 
   var body: some View {
@@ -35,10 +48,27 @@ struct SettingsNightShiftSection: View {
       if nightShift.isEnabled {
         groupDivider
 
-        HStack(alignment: .bottom, spacing: 36) {
+        HStack(alignment: .bottom, spacing: 32) {
           labeledMenu("Location", value: nightShift.region.name, focus: .location) { regionPicker }
-          labeledMenu("Dimness", value: nightShift.dimness.displayName, focus: .dimness) { dimnessPicker }
-          labeledMenu("Warmth", value: nightShift.warmth.displayName, focus: .warmth) { warmthPicker }
+
+          stepper(
+            "Dimness",
+            levels: NightShiftDimness.allCases,
+            selected: nightShift.dimness,
+            display: { $0.displayName },
+            down: .dimnessDown,
+            up: .dimnessUp,
+            commit: { nightShift.dimness = $0 }
+          )
+          stepper(
+            "Warmth",
+            levels: NightShiftWarmth.allCases,
+            selected: nightShift.warmth,
+            display: { $0.displayName },
+            down: .warmthDown,
+            up: .warmthUp,
+            commit: { nightShift.warmth = $0 }
+          )
 
           Spacer(minLength: 24)
 
@@ -57,14 +87,17 @@ struct SettingsNightShiftSection: View {
     .padding(.horizontal, 28)
     .settingsGlassPanel(disabled: glassDisabled)
     .onChange(of: focusedControl) { _, control in
-      switch control {
-      case .dimness, .warmth:
-        nightShift.isPreviewing = true
-      case .location, .preview, nil:
-        nightShift.isPreviewing = false
-      }
+      // Full-strength preview only while a Dimness/Warmth arrow is focused, so the
+      // viewer can calibrate at deep-night intensity; it switches off the moment
+      // focus moves to Location, the preview button, or off the section entirely.
+      nightShift.isPreviewing = control?.previewsLive ?? false
     }
-    .onDisappear { nightShift.isPreviewing = false }
+    .onChange(of: nightShift.isEnabled) { _, enabled in
+      if !enabled { nightShift.isPreviewing = false }
+    }
+    .onDisappear {
+      nightShift.isPreviewing = false
+    }
   }
 
   /// Compact "fast-forward a day" trigger; the simulated clock replaces the label
@@ -84,7 +117,7 @@ struct SettingsNightShiftSection: View {
 
   /// A small inline label paired with its dropdown trigger, used to pack Location,
   /// Dimness, and Warmth onto a single line. `focus` ties the trigger into the
-  /// section's focus tracking so Dimness/Warmth can drive the live preview.
+  /// section's focus tracking.
   private func labeledMenu<Content: View>(
     _ label: String,
     value: String,
@@ -105,6 +138,56 @@ struct SettingsNightShiftSection: View {
     }
   }
 
+  /// A labeled left/right stepper for Dimness/Warmth. Each press of an arrow
+  /// commits the next level immediately, so — paired with the full-strength
+  /// preview that turns on while an arrow is focused — the overlay updates live as
+  /// you step. Stepping is the *select* action; left/right swipes still move focus
+  /// between controls as usual, so there's no dropdown to trap focus.
+  private func stepper<Level: Hashable>(
+    _ label: String,
+    levels: [Level],
+    selected: Level,
+    display: (Level) -> String,
+    down: NSControl,
+    up: NSControl,
+    commit: @escaping (Level) -> Void
+  ) -> some View {
+    let index = levels.firstIndex(of: selected) ?? 0
+    return VStack(alignment: .leading, spacing: 8) {
+      Text(label)
+        .font(.system(size: 24, weight: .semibold))
+        .foregroundStyle(.secondary)
+      HStack(spacing: 14) {
+        stepArrow(.chevronLeft, focus: down, enabled: index > 0) {
+          if index > 0 { commit(levels[index - 1]) }
+        }
+        Text(display(selected))
+          .font(.headline)
+          .lineLimit(1)
+          .frame(minWidth: 150)
+        stepArrow(.chevronRight, focus: up, enabled: index < levels.count - 1) {
+          if index < levels.count - 1 { commit(levels[index + 1]) }
+        }
+      }
+    }
+  }
+
+  /// One arrow of a stepper. Stays focusable at the ends (so focus — and the live
+  /// preview — isn't lost when you reach Min/Max); it just dims and no-ops there.
+  private func stepArrow(
+    _ glyph: Glyph,
+    focus: NSControl,
+    enabled: Bool,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Icon(glyph: glyph, size: 36)
+        .opacity(enabled ? 1 : 0.3)
+    }
+    .settingsProminentActionButtonStyle()
+    .focused($focusedControl, equals: focus)
+  }
+
   private var regionPicker: some View {
     Picker("Location", selection: regionSelection) {
       ForEach(NightShiftRegion.sortedCatalog) { region in
@@ -114,41 +197,9 @@ struct SettingsNightShiftSection: View {
     .pickerStyle(.inline)
   }
 
-  private var dimnessPicker: some View {
-    Picker("Dimness", selection: dimnessSelection) {
-      ForEach(NightShiftDimness.allCases) { level in
-        Text(level.displayName).tag(level)
-      }
-    }
-    .pickerStyle(.inline)
-  }
-
-  private var warmthPicker: some View {
-    Picker("Warmth", selection: warmthSelection) {
-      ForEach(NightShiftWarmth.allCases) { level in
-        Text(level.displayName).tag(level)
-      }
-    }
-    .pickerStyle(.inline)
-  }
-
   private var groupDivider: some View {
     Divider()
       .overlay(Color.primary.opacity(0.12))
-  }
-
-  private var dimnessSelection: Binding<NightShiftDimness> {
-    Binding(
-      get: { nightShift.dimness },
-      set: { nightShift.dimness = $0 }
-    )
-  }
-
-  private var warmthSelection: Binding<NightShiftWarmth> {
-    Binding(
-      get: { nightShift.warmth },
-      set: { nightShift.warmth = $0 }
-    )
   }
 
   private var regionSelection: Binding<String> {

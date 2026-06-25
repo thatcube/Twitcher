@@ -13,6 +13,7 @@ import SwiftUI
 /// `<name>`.
 enum Glyph: String {
   case chevronLeft = "chevron-left"
+  case chevronRight = "chevron-right"
   case selector
   case plus
   case minus
